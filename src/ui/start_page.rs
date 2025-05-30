@@ -86,7 +86,7 @@ fn create_rustui_ascii_title() -> String {
 
 /// Renders the application tagline and disclaimer
 fn render_disclaimer(frame: &mut Frame, area: Rect) {
-    let disclaimer = "✨ A placeholder for something great ✨";
+    let disclaimer = "Boilerplate & Code snippets manager ";
 
     let disclaimer_paragraph = Paragraph::new(disclaimer)
         .alignment(Alignment::Center)
@@ -133,7 +133,7 @@ fn render_menu(frame: &mut Frame, area: Rect, app: &App) {
             let prefix = if i == app.selected_menu_item {
                 "▶"
             } else {
-                ""
+                " "
             };
 
             let content = format!("{} {} {}", prefix, icon, name);
