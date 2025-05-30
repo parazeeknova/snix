@@ -1,6 +1,6 @@
 //! Start Page UI Module
 //!
-//! This module handles the rendering of the main start page (home screen) for RustUI.
+//! This module handles the rendering of the main start page (home screen) for snix.
 //! The start page serves as the primary navigation hub and landing screen, featuring:
 
 use crate::app::App;
@@ -22,7 +22,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let main_area = frame.area();
 
     let block = Block::bordered()
-        .title(" BoilerForge - Template & Boilerplate Manager ")
+        .title(" snix - Template & Boilerplate Manager ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
@@ -74,19 +74,21 @@ fn render_title(frame: &mut Frame, area: Rect) {
 /// Generates the ASCII art representation of the application name
 fn create_rustui_ascii_title() -> String {
     r#"
-██████╗ ██╗   ██╗███████╗████████╗██╗   ██╗██╗
-██╔══██╗██║   ██║██╔════╝╚══██╔══╝██║   ██║██║
-██████╔╝██║   ██║███████╗   ██║   ██║   ██║██║
-██╔══██╗██║   ██║╚════██║   ██║   ██║   ██║██║
-██║  ██║╚██████╔╝███████║   ██║   ╚██████╔╝██║
-╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚═╝
+███████╗███╗   ██╗██╗██╗  ██╗
+██╔════╝████╗  ██║██║╚██╗██╔╝
+███████╗██╔██╗ ██║██║ ╚███╔╝ 
+╚════██║██║╚██╗██║██║ ██╔██╗
+███████║██║ ╚████║██║██╔╝ ██╗
+╚══════╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝
+
+          ⚡ Lightning Fast ⚡
 "#
     .to_string()
 }
 
 /// Renders the application tagline and disclaimer
 fn render_disclaimer(frame: &mut Frame, area: Rect) {
-    let disclaimer = "Boilerplate & Code snippets manager ";
+    let disclaimer = "Fast ⚡ Boilerplate & Code snippets manager";
 
     let disclaimer_paragraph = Paragraph::new(disclaimer)
         .alignment(Alignment::Center)
@@ -176,7 +178,7 @@ fn render_description(frame: &mut Frame, area: Rect, app: &App) {
         "Create, manage and deploy boilerplates for React, Vue, Angular, and more",
         "Discover community templates, frameworks, and starter projects",
         "Quick access to reusable code snippets and development patterns",
-        "Learn about RustUI's powerful boilerplate management features",
+        "Learn about snix's powerful boilerplate management features",
         "Customize your development workflow and preferences",
         "Save your work and exit the application",
     ];

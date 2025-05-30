@@ -1,10 +1,10 @@
-//! RustUI - Template & Boilerplate Manager
+//! snix - Template & Boilerplate Manager
 //!
 //! A terminal-based user interface application for managing development boilerplates,
 //! project templates, and code snippets. Built with Rust and ratatui for a fast,
 //! efficient, and beautiful terminal experience.
 //!
-//! RustUI provides developers with a centralized tool to:
+//! snix provides developers with a centralized tool to:
 //! - Manage project templates and boilerplates for various tech stacks
 //! - Browse and download community-created templates from a marketplace
 //! - Store and organize frequently used code snippets
@@ -31,7 +31,7 @@ use handlers::keys::handle_key_events;
 /// The function uses color-eyre for enhanced error reporting, which provides beautiful
 /// stack traces and helpful debugging information in case of panics or errors.
 fn main() -> Result<()> {
-    println!("🔨 Starting BoilerForge - Template & Boilerplate Manager!");
+    println!("🔨 Starting snix - Template & Boilerplate Manager!");
     println!("Created by parazeeknova");
 
     color_eyre::install()?;

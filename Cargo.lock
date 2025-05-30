@@ -634,18 +634,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
 
 [[package]]
-name = "rustyui"
-version = "0.0.1"
-dependencies = [
- "chrono",
- "color-eyre",
- "figlet-rs",
- "ratatui",
- "serde",
- "uuid",
-]
-
-[[package]]
 name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -727,6 +715,18 @@ name = "smallvec"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
+
+[[package]]
+name = "snix"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "color-eyre",
+ "figlet-rs",
+ "ratatui",
+ "serde",
+ "uuid",
+]
 
 [[package]]
 name = "static_assertions"
