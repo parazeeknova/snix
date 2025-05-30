@@ -234,7 +234,7 @@ pub fn render_wip_dialog(frame: &mut Frame, area: Rect, page_title: &str, app: &
     let wip_content = vec![
         Line::from(vec![Span::styled("", Style::default())]),
         Line::from(vec![Span::styled(
-            "        ⚠️  WORK IN PROGRESS  ⚠️",
+            "          WORK IN PROGRESS  ⚠️",
             Style::default().fg(RosePine::GOLD).bold(),
         )]),
         Line::from(vec![Span::styled("", Style::default())]),
@@ -258,7 +258,7 @@ pub fn render_wip_dialog(frame: &mut Frame, area: Rect, page_title: &str, app: &
         .alignment(Alignment::Center)
         .block(
             Block::bordered()
-                .title(" 🚧 Under Construction 🚧 ")
+                .title(" Under Construction 🚧 ")
                 .title_alignment(Alignment::Center)
                 .border_type(BorderType::Double)
                 .style(Style::default().fg(RosePine::LOVE)),

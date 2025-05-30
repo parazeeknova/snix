@@ -41,7 +41,6 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         // Global quit command - works from any page
         KeyCode::Char('q') | KeyCode::Char('Q') => {
-            // Only quit from start page or when not in edit mode
             if app.state == AppState::StartPage || app.state != AppState::CodeSnippets {
                 return true;
             }
@@ -271,14 +270,12 @@ fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
 
 /// Handles keys for the main notebook list view
 fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
-    // Dismiss any messages with Enter key
     if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
     {
         app.clear_messages();
         return false;
     }
 
-    // Clear messages on most interactions (except when in special modes)
     if app.input_mode == InputMode::Normal {
         match key.code {
             KeyCode::Esc
@@ -294,11 +291,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         }
     }
 
-    // We've skipped language selection, so we don't need this code anymore
-    // This comment is kept as a reminder that language selection has been removed
-
     match key.code {
-        // Navigation in tree view
         KeyCode::Up | KeyCode::Char('k') => {
             app.previous_tree_item();
             false
@@ -323,15 +316,10 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                         app.code_snippets_state = CodeSnippetsState::NotebookView { notebook_id };
                     }
                     TreeItem::Snippet(snippet_id) => {
-                        // Mark as accessed and launch editor
                         if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
                             snippet.mark_accessed();
                         }
-
-                        // Save the database first
                         let _ = app.save_database();
-
-                        // Launch external editor
                         launch_external_editor(app, snippet_id);
                     }
                 }
@@ -339,7 +327,6 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
-        // Create new notebook
         KeyCode::Char('n') | KeyCode::Char('N') => {
             app.clear_messages();
             app.input_mode = InputMode::CreateNotebook;

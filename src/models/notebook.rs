@@ -29,8 +29,8 @@ impl Notebook {
             created_at: now,
             updated_at: now,
             tags: Vec::new(),
-            color: String::from("#f38ba8"), // Rose Pine love color
-            icon: String::from("○"),        // Unicode circle symbol instead of emoji
+            color: String::from("#f38ba8"),
+            icon: String::from(""),
             parent_id: None,
             children: Vec::new(),
             snippet_count: 0,
@@ -41,7 +41,7 @@ impl Notebook {
     pub fn new_with_parent(name: String, parent_id: Uuid) -> Self {
         let mut notebook = Self::new(name);
         notebook.parent_id = Some(parent_id);
-        notebook.icon = String::from("◉"); // Filled circle symbol instead of emoji
+        notebook.icon = String::from("");
         notebook
     }
 

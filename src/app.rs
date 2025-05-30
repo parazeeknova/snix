@@ -97,7 +97,7 @@ pub struct App {
     pub input_mode: InputMode,
     pub selected_language: usize,
     pub pending_snippet_title: String,
-    pub needs_redraw: bool, // Flag to indicate a full UI redraw is needed
+    pub needs_redraw: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -508,17 +508,17 @@ impl App {
         match self.state {
             AppState::StartPage => start_page::render(frame, self),
             AppState::Boilerplates => {
-                components::render_wip_dialog(frame, frame.area(), "▣ Boilerplates", self)
+                components::render_wip_dialog(frame, frame.area(), "󰘦 Boilerplates", self)
             }
             AppState::Marketplace => {
-                components::render_wip_dialog(frame, frame.area(), "◐ Marketplace", self)
+                components::render_wip_dialog(frame, frame.area(), "󰓜 Marketplace", self)
             }
             AppState::CodeSnippets => code_snippets::render(frame, self),
             AppState::InfoPage => {
-                components::render_wip_dialog(frame, frame.area(), "ⓘ About", self)
+                components::render_wip_dialog(frame, frame.area(), "  About", self)
             }
             AppState::Settings => {
-                components::render_wip_dialog(frame, frame.area(), "⚙ Settings", self)
+                components::render_wip_dialog(frame, frame.area(), " Settings", self)
             }
         }
     }

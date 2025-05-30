@@ -45,31 +45,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     color_eyre::install()?;
 
-    // Initialize terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
-    // Create terminal backend
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app state
     let mut app = App::new();
     let mut should_quit = false;
 
-    // Main event loop
     while !should_quit {
         // Check if we need a full redraw
         if app.needs_redraw {
             force_redraw(&mut terminal, &app)?;
             app.needs_redraw = false;
         } else {
-            // Normal render
             terminal.draw(|frame| app.render(frame))?;
         }
 
-        // Wait for events with a timeout (longer timeout reduces CPU usage)
+        // Wait for events with a timeout
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
                 should_quit = handlers::keys::handle_key_events(key, &mut app);
@@ -86,7 +81,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         app._tick();
     }
 
-    // Cleanup and restore terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),

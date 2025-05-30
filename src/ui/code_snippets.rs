@@ -12,7 +12,6 @@ use ratatui::{
 pub fn render(frame: &mut Frame, app: &App) {
     let main_area = frame.area();
 
-    // Check if we have any notebooks
     if app.snippet_database.notebooks.is_empty() {
         render_welcome_screen(frame, main_area, app);
         return;
@@ -37,7 +36,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
 fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" ✎ Code Snippets Manager ")
+        .title("  Code Snippets Manager ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
@@ -53,7 +52,6 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
     ])
     .split(inner_area);
 
-    // Welcome message
     let welcome_text = vec![
         Line::from(""),
         Line::from(Span::styled(
@@ -85,17 +83,13 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
         .style(Style::default().fg(RosePine::TEXT));
 
     welcome_paragraph.render(chunks[1], frame.buffer_mut());
-
-    // Instructions at bottom
     render_bottom_bar(frame, chunks[3], app);
-
-    // ALWAYS render overlays LAST to ensure they appear on top
     render_overlays(frame, area, app);
 }
 
 fn render_main_view(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" ✎ Code Snippets Manager ")
+        .title("  Code Snippets Manager ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
@@ -106,17 +100,13 @@ fn render_main_view(frame: &mut Frame, area: Rect, app: &App) {
     let main_chunks =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).split(inner_area);
 
-    let content_chunks = Layout::horizontal([
-        Constraint::Percentage(35), // Tree view
-        Constraint::Fill(1),        // Preview/details
-    ])
-    .split(main_chunks[0]);
+    let content_chunks =
+        Layout::horizontal([Constraint::Percentage(35), Constraint::Fill(1)]).split(main_chunks[0]);
 
     render_tree_view(frame, content_chunks[0], app);
     render_preview_panel(frame, content_chunks[1], app);
     render_bottom_bar(frame, main_chunks[1], app);
 
-    // ALWAYS render overlays LAST to ensure they appear on top
     render_overlays(frame, area, app);
 }
 
@@ -135,7 +125,6 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &App) {
             render_language_selection_overlay(frame, area, app);
         }
         InputMode::Normal => {
-            // Show error/success messages
             if let Some(ref message) = app.error_message {
                 render_message_overlay(frame, area, message, true);
             } else if let Some(ref message) = app.success_message {
@@ -148,8 +137,6 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &App) {
 /// Render language selection overlay
 fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &App) {
     let popup_area = centered_rect(70, 80, area);
-
-    // Clear the area
     Clear.render(popup_area, frame.buffer_mut());
 
     let block = Block::bordered()
@@ -168,14 +155,12 @@ fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &App) {
     ])
     .split(inner_area);
 
-    // Title info
     let title_text = format!("Creating snippet: \"{}\"", app.pending_snippet_title);
     let title_paragraph = Paragraph::new(title_text)
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::TEXT).bold());
     title_paragraph.render(chunks[0], frame.buffer_mut());
 
-    // Language list
     let languages = get_available_languages();
     let language_items: Vec<ListItem> = languages
         .iter()
@@ -209,7 +194,6 @@ fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_stateful_widget(language_list, chunks[1], &mut list_state);
 
-    // Instructions
     let instructions = "Use ↑/↓ or j/k to navigate • Enter to select • Esc to cancel";
     let instructions_paragraph = Paragraph::new(instructions)
         .alignment(Alignment::Center)
@@ -221,7 +205,6 @@ fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &App) {
 fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error: bool) {
     let popup_area = centered_rect(60, 20, area);
 
-    // Clear the area
     Clear.render(popup_area, frame.buffer_mut());
 
     let (title, color) = if is_error {
@@ -253,13 +236,11 @@ fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error
         .style(Style::default().fg(RosePine::TEXT));
     message_paragraph.render(chunks[1], frame.buffer_mut());
 
-    // Add OK button
     let ok_button = Paragraph::new("[ OK ]")
         .alignment(Alignment::Center)
         .style(Style::default().fg(color).bold());
     ok_button.render(chunks[3], frame.buffer_mut());
 
-    // Add instructions
     let instructions = "Press Enter or Esc to dismiss";
     let instructions_paragraph = Paragraph::new(instructions)
         .alignment(Alignment::Center)
@@ -304,7 +285,7 @@ fn get_available_languages() -> Vec<crate::models::SnippetLanguage> {
 
 fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" ◉ Notebooks & Snippets ")
+        .title("  Notebooks & Snippets ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
@@ -327,7 +308,7 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
             let (_icon, name, style) = match item {
                 TreeItem::Notebook(id) => {
                     if let Some(notebook) = app.snippet_database.notebooks.get(id) {
-                        let icon = notebook.icon.as_str();
+                        let icon = " ";
                         let name =
                             format!("{} {} ({})", icon, notebook.name, notebook.snippet_count);
                         let style = if i == app.selected_tree_item {
@@ -387,7 +368,7 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_preview_panel(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" ◎ Preview ")
+        .title("  Preview ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
@@ -426,7 +407,7 @@ fn render_notebook_preview(
     // Notebook info
     let info_lines = vec![
         Line::from(vec![
-            Span::styled("○ ", Style::default().fg(RosePine::GOLD)),
+            Span::styled("󰠮 ", Style::default().fg(RosePine::GOLD)),
             Span::styled(&notebook.name, Style::default().fg(RosePine::TEXT).bold()),
         ]),
         Line::from(""),
@@ -565,8 +546,7 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
         use std::process::{Command, Stdio};
         use std::str;
 
-        // Get the full content for preview
-        let preview_content = snippet.get_preview(0); // Parameter is ignored, gets full content
+        let preview_content = snippet.get_preview(0);
         let title = format!(" Content Preview ({}) ", snippet.language.display_name());
 
         let content_block = Block::bordered()
@@ -601,13 +581,11 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
             {
                 Ok(process) => process,
                 Err(_) => {
-                    // Fallback to regular display if bat fails to start
                     display_regular_content(frame, inner_content_area, &preview_content, snippet);
                     return;
                 }
             };
 
-            // Write content to bat's stdin
             if let Some(stdin) = bat_process.stdin.as_mut() {
                 if stdin.write_all(preview_content.as_bytes()).is_err() {
                     display_regular_content(frame, inner_content_area, &preview_content, snippet);
@@ -666,7 +644,7 @@ fn display_regular_content(
 
     let content_paragraph = Paragraph::new(content)
         .wrap(Wrap { trim: false })
-        .scroll((0, 0)) // Start at the top
+        .scroll((0, 0))
         .style(content_style);
 
     content_paragraph.render(area, frame.buffer_mut());
@@ -675,7 +653,6 @@ fn display_regular_content(
 fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
     let popup_area = centered_rect(60, 20, area);
 
-    // Clear the area
     Clear.render(popup_area, frame.buffer_mut());
 
     let title = match app.input_mode {
@@ -703,7 +680,6 @@ fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
     ])
     .split(inner_area);
 
-    // Input field
     let input_text = format!("> {}", app.input_buffer);
     let input_paragraph = Paragraph::new(input_text)
         .style(Style::default().fg(RosePine::TEXT))
@@ -715,7 +691,6 @@ fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
 
     input_paragraph.render(chunks[0], frame.buffer_mut());
 
-    // Instructions
     let instructions = match app.input_mode {
         InputMode::CreateNotebook => "Enter notebook name and press Enter",
         InputMode::CreateSnippet => {
@@ -757,11 +732,9 @@ fn render_snippet_editor(frame: &mut Frame, area: Rect, _app: &App, _snippet_id:
 }
 
 fn render_create_notebook_dialog(frame: &mut Frame, area: Rect, app: &App) {
-    // Use the input overlay with the correct mode
     if app.input_mode == InputMode::CreateNotebook {
         render_input_overlay(frame, area, app);
     } else {
-        // If we're not in the correct input mode, show error message
         let message = "Error: Not in notebook creation mode";
         render_message_overlay(frame, area, message, true);
     }
@@ -771,8 +744,8 @@ fn render_create_snippet_dialog(frame: &mut Frame, area: Rect, app: &App, notebo
     match app.input_mode {
         InputMode::CreateSnippet => {
             // Check that we have a valid notebook
+            // Show notebook name in the dialog
             if app.snippet_database.notebooks.contains_key(&notebook_id) {
-                // Show notebook name in the dialog
                 let notebook_name = app
                     .snippet_database
                     .notebooks
@@ -800,7 +773,6 @@ fn render_create_snippet_dialog(frame: &mut Frame, area: Rect, app: &App, notebo
                 ])
                 .split(inner_area);
 
-                // Input field
                 let input_text = format!("> {}", app.input_buffer);
                 let input_paragraph = Paragraph::new(input_text)
                     .style(Style::default().fg(RosePine::TEXT))
@@ -812,7 +784,6 @@ fn render_create_snippet_dialog(frame: &mut Frame, area: Rect, app: &App, notebo
 
                 input_paragraph.render(chunks[0], frame.buffer_mut());
 
-                // Instructions
                 let instructions =
                     "Enter snippet title with optional extension (e.g. 'example.py')";
                 let instructions_paragraph = Paragraph::new(instructions)
@@ -828,17 +799,14 @@ fn render_create_snippet_dialog(frame: &mut Frame, area: Rect, app: &App, notebo
 
                 help_paragraph.render(chunks[2], frame.buffer_mut());
             } else {
-                // If notebook doesn't exist, show error
                 let message = "Error: Selected notebook not found";
                 render_message_overlay(frame, area, message, true);
             }
         }
         InputMode::SelectLanguage => {
-            // Show language selection dialog for the snippet
             render_language_selection_overlay(frame, area, app);
         }
         _ => {
-            // If we're not in the correct input mode, show error message
             let message = "Error: Not in snippet creation mode";
             render_message_overlay(frame, area, message, true);
         }

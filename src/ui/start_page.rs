@@ -36,17 +36,17 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let main_chunks = if has_recent_snippets {
         Layout::vertical([
-            Constraint::Fill(1),   // Main content area (title + disclaimer + menu)
-            Constraint::Length(2), // Description area
-            Constraint::Length(8), // Recent snippets area
-            Constraint::Length(3), // Bottom navigation bar
+            Constraint::Fill(1),
+            Constraint::Length(2),
+            Constraint::Length(8),
+            Constraint::Length(3),
         ])
         .split(inner_area)
     } else {
         Layout::vertical([
-            Constraint::Fill(1),   // Main content area (title + disclaimer + menu)
-            Constraint::Length(3), // Description area (larger when no snippets)
-            Constraint::Length(3), // Bottom navigation bar
+            Constraint::Fill(1),
+            Constraint::Length(3),
+            Constraint::Length(3),
         ])
         .split(inner_area)
     };
@@ -59,11 +59,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     .split(main_chunks[0])[1];
 
     let content_chunks = Layout::vertical([
-        Constraint::Fill(1),    // Top padding
-        Constraint::Length(8),  // Title area
-        Constraint::Length(2),  // Disclaimer area
-        Constraint::Length(16), // Menu area (increased for padding)
-        Constraint::Fill(1),    // Bottom padding
+        Constraint::Fill(1),
+        Constraint::Length(8),
+        Constraint::Length(2),
+        Constraint::Length(16),
+        Constraint::Fill(1),
     ])
     .split(content_area);
 
@@ -134,11 +134,11 @@ fn render_menu(frame: &mut Frame, area: Rect, app: &App) {
     .split(menu_area)[1];
 
     let menu_items = vec![
-        ("󰈮", "Boilerplates", "b"),
-        ("󱣒", "Marketplace", "m"),
-        ("", "Code Snippets", "s"),
-        ("", "About", "i"),
-        ("", "Settings", "c"),
+        ("󰘦", "Boilerplates", "b"),
+        ("󰓜", "Marketplace", "m"),
+        ("", "Code Snippets", "s"),
+        ("", "About", "i"),
+        ("", "Settings", "c"),
         ("󰈆", "Exit", "q"),
     ];
 
@@ -217,7 +217,7 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
     // Use the same width as the menu for visual consistency
     let snippets_area = Layout::horizontal([
         Constraint::Fill(1),
-        Constraint::Length(45), // Match menu width
+        Constraint::Length(45),
         Constraint::Fill(1),
     ])
     .split(area)[1];
@@ -234,7 +234,7 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
     // Get most recently accessed snippets
     let mut recent_snippets: Vec<_> = app.snippet_database.snippets.values().collect();
     recent_snippets.sort_by(|a, b| b.accessed_at.cmp(&a.accessed_at));
-    recent_snippets.truncate(3); // Show only 3 most recent for compact layout
+    recent_snippets.truncate(3);
 
     if recent_snippets.is_empty() {
         let empty_text = Paragraph::new("No snippets accessed yet. Press 's' to create some!")
