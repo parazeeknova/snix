@@ -1,109 +1,63 @@
-use color_eyre::eyre::{Ok, Result};
+//! RustUI - Template & Boilerplate Manager
+//!
+//! A terminal-based user interface application for managing development boilerplates,
+//! project templates, and code snippets. Built with Rust and ratatui for a fast,
+//! efficient, and beautiful terminal experience.
+//!
+//! RustUI provides developers with a centralized tool to:
+//! - Manage project templates and boilerplates for various tech stacks
+//! - Browse and download community-created templates from a marketplace
+//! - Store and organize frequently used code snippets
+//! - Configure development workflow preferences
+
+use color_eyre::eyre::Result;
 use ratatui::{
-    DefaultTerminal, Frame,
-    crossterm::{
-        event::{self, Event},
-        style::Color,
-    },
-    layout::{Constraint, Layout},
-    style::{Style, Stylize},
-    widgets::{Block, List, ListItem, ListState, Paragraph, Widget},
+    DefaultTerminal,
+    crossterm::event::{self, Event},
 };
 
-#[derive(Debug, Default)]
-struct AppState {
-    items: Vec<TodoItem>,
-    list_state: ListState,
-}
+mod app;
+mod handlers;
+mod ui;
 
-#[derive(Debug, Default)]
-struct TodoItem {
-    is_done: bool,
-    description: String,
-}
+use app::App;
+use handlers::keys::handle_key_events;
 
+/// Application entry point and initialization
+///
+/// This function serves as the main entry point for the RustUI application. It handles
+/// the complete application lifecycle from startup to shutdown.
+///
+/// The function uses color-eyre for enhanced error reporting, which provides beautiful
+/// stack traces and helpful debugging information in case of panics or errors.
 fn main() -> Result<()> {
-    println!("Starting rustyui by parazeeknova!");
-
-    let mut state = AppState::default();
-
-    // Demo states for debug
-    state.items.push(TodoItem {
-        is_done: false,
-        description: String::from("Debug 1"),
-    });
-
-    state.items.push(TodoItem {
-        is_done: false,
-        description: String::from("Debug 2"),
-    });
-
-    state.items.push(TodoItem {
-        is_done: false,
-        description: String::from("Debug 3"),
-    });
+    println!("🔨 Starting BoilerForge - Template & Boilerplate Manager!");
+    println!("Created by parazeeknova");
 
     color_eyre::install()?;
-
-    let terminal: ratatui::Terminal<ratatui::prelude::CrosstermBackend<std::io::Stdout>> =
-        ratatui::init();
-    let result: std::result::Result<(), color_eyre::eyre::Error> = run(terminal, &mut state);
+    let terminal = ratatui::init();
+    let result = run(terminal);
     ratatui::restore();
 
     result
 }
 
-fn run(mut terminal: DefaultTerminal, app_state: &mut AppState) -> Result<()> {
+/// Main application event loop and terminal management
+///
+/// This function contains the core application logic that drives the entire user interface.
+/// It manages the application state, handles the continuous render-update cycle, and
+/// processes user input events in a responsive manner.
+fn run(mut terminal: DefaultTerminal) -> Result<()> {
+    let mut app = App::new();
+    // Main event loop - continues until user requests exit
     loop {
-        // Rendering
-        terminal.draw(|f| render(f, app_state))?;
+        terminal.draw(|frame| app.render(frame))?;
 
-        // Input Handling
         if let Event::Key(key) = event::read()? {
-            match key.code {
-                event::KeyCode::Esc => {
-                    break;
-                }
-                event::KeyCode::Char(char) => match char {
-                    'k' => {
-                        app_state.list_state.select_previous();
-                    }
-                    'j' => {
-                        app_state.list_state.select_next();
-                    }
-                    _ => {}
-                },
-                _ => {}
+            if handle_key_events(key, &mut app) {
+                break;
             }
         }
     }
     Ok(())
-}
-
-fn render(frame: &mut Frame, app_state: &mut AppState) {
-    // Paragraph::new("Starting RustyUI 0.1").render(frame.area(), frame.buffer_mut());
-
-    let [border_area] = Layout::vertical([Constraint::Fill(1)])
-        .margin(1)
-        .areas(frame.area());
-
-    let [inner_area] = Layout::vertical([Constraint::Fill(1)])
-        .margin(1)
-        .areas(border_area);
-
-    Block::bordered()
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .fg(Color::Yellow)
-        .render(border_area, frame.buffer_mut());
-
-    let list = List::new(
-        app_state
-            .items
-            .iter()
-            .map(|x| ListItem::from(x.description.clone())),
-    )
-    .highlight_symbol("> ")
-    .highlight_style(Style::default().fg(ratatui::style::Color::Green));
-
-    frame.render_stateful_widget(list, inner_area, &mut app_state.list_state);
 }
