@@ -9,8 +9,10 @@
 //! making it easy to add new pages and features while maintaining a consistent
 //! navigation experience.
 
-use crate::ui::{components, start_page};
+use crate::models::{CodeSnippet, Notebook, SnippetDatabase, SnippetLanguage, StorageManager};
+use crate::ui::{code_snippets, components, start_page};
 use ratatui::Frame;
+use uuid::Uuid;
 
 /// Application State Enumeration
 ///
@@ -40,6 +42,25 @@ impl Default for AppState {
     }
 }
 
+/// Code Snippets Page Sub-States
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodeSnippetsState {
+    NotebookList,
+    NotebookView { notebook_id: Uuid },
+    SnippetEditor { snippet_id: Uuid },
+    CreateNotebook,
+    CreateSnippet { notebook_id: Uuid },
+    SearchSnippets,
+    Settings,
+}
+
+/// Tree view item types for navigation
+#[derive(Debug, Clone, PartialEq)]
+pub enum TreeItem {
+    Notebook(Uuid),
+    Snippet(Uuid),
+}
+
 /// Main Application State Container
 ///
 /// This struct holds all the state information needed to run the application.
@@ -60,6 +81,45 @@ pub struct App {
     pub state: AppState,
     pub selected_menu_item: usize,
     pub page_history: Vec<AppState>,
+
+    // Code Snippets Manager State
+    pub code_snippets_state: CodeSnippetsState,
+    pub snippet_database: SnippetDatabase,
+    pub storage_manager: Option<StorageManager>,
+    pub selected_tree_item: usize,
+    pub tree_items: Vec<TreeItem>,
+    pub current_notebook_id: Option<Uuid>,
+    pub search_query: String,
+    pub filtered_snippets: Vec<Uuid>,
+    pub show_favorites_only: bool,
+    pub sort_by: SortBy,
+    pub error_message: Option<String>,
+    pub success_message: Option<String>,
+    pub is_editing: bool,
+    pub input_buffer: String,
+    pub input_mode: InputMode,
+    pub selected_language: usize,
+    pub pending_snippet_title: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SortBy {
+    Name,
+    Created,
+    Updated,
+    Language,
+    UseCount,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputMode {
+    Normal,
+    CreateNotebook,
+    CreateSnippet,
+    SelectLanguage,
+    Search,
+    RenameNotebook,
+    RenameSnippet,
 }
 
 impl App {
@@ -73,11 +133,39 @@ impl App {
     ///
     /// A new `App` instance ready to be used for rendering and event handling.
     pub fn new() -> Self {
-        Self {
+        let storage_manager = StorageManager::new().ok();
+        let snippet_database = if let Some(ref manager) = storage_manager {
+            manager.load_database().unwrap_or_default()
+        } else {
+            SnippetDatabase::default()
+        };
+
+        let mut app = Self {
             state: AppState::StartPage,
             selected_menu_item: 0,
             page_history: vec![AppState::StartPage],
-        }
+
+            code_snippets_state: CodeSnippetsState::NotebookList,
+            snippet_database,
+            storage_manager,
+            selected_tree_item: 0,
+            tree_items: Vec::new(),
+            current_notebook_id: None,
+            search_query: String::new(),
+            filtered_snippets: Vec::new(),
+            show_favorites_only: false,
+            sort_by: SortBy::Updated,
+            error_message: None,
+            success_message: None,
+            is_editing: false,
+            input_buffer: String::new(),
+            input_mode: InputMode::Normal,
+            selected_language: 0,
+            pending_snippet_title: String::new(),
+        };
+
+        app.refresh_tree_items();
+        app
     }
 
     /// Moves the menu selection to the next item in a circular fashion
@@ -121,6 +209,12 @@ impl App {
         if self.state != new_state {
             self.page_history.push(self.state.clone());
             self.state = new_state;
+
+            // Reset code snippets state when entering
+            if self.state == AppState::CodeSnippets {
+                self.code_snippets_state = CodeSnippetsState::NotebookList;
+                self.refresh_tree_items();
+            }
         }
     }
 
@@ -152,6 +246,258 @@ impl App {
         !self.page_history.is_empty()
     }
 
+    // Code Snippets Manager Methods
+
+    pub fn refresh_tree_items(&mut self) {
+        self.tree_items.clear();
+
+        // Add root notebooks - clone to avoid borrowing issues
+        let root_notebooks = self.snippet_database.root_notebooks.clone();
+        for notebook_id in root_notebooks {
+            self.add_notebook_to_tree(notebook_id, 0);
+        }
+
+        // If no notebooks exist, tree is empty
+        if self.tree_items.is_empty() {
+            self.selected_tree_item = 0;
+        } else {
+            self.selected_tree_item = self.selected_tree_item.min(self.tree_items.len() - 1);
+        }
+    }
+
+    fn add_notebook_to_tree(&mut self, notebook_id: Uuid, _depth: usize) {
+        self.tree_items.push(TreeItem::Notebook(notebook_id));
+
+        // Add snippets in this notebook
+        let snippets: Vec<_> = self
+            .snippet_database
+            .snippets
+            .values()
+            .filter(|s| s.notebook_id == notebook_id)
+            .map(|s| s.id)
+            .collect();
+
+        for snippet_id in snippets {
+            self.tree_items.push(TreeItem::Snippet(snippet_id));
+        }
+
+        // Add child notebooks - clone to avoid borrowing issues
+        if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id) {
+            let children = notebook.children.clone();
+            for child_id in children {
+                self.add_notebook_to_tree(child_id, _depth + 1);
+            }
+        }
+    }
+
+    pub fn next_tree_item(&mut self) {
+        if !self.tree_items.is_empty() {
+            self.selected_tree_item = (self.selected_tree_item + 1) % self.tree_items.len();
+        }
+    }
+
+    pub fn previous_tree_item(&mut self) {
+        if !self.tree_items.is_empty() {
+            self.selected_tree_item = if self.selected_tree_item == 0 {
+                self.tree_items.len() - 1
+            } else {
+                self.selected_tree_item - 1
+            };
+        }
+    }
+
+    pub fn create_notebook(&mut self, name: String) -> Result<Uuid, String> {
+        if name.trim().is_empty() {
+            return Err("Notebook name cannot be empty".to_string());
+        }
+
+        let notebook = if let Some(parent_id) = self.current_notebook_id {
+            Notebook::new_with_parent(name, parent_id)
+        } else {
+            Notebook::new(name)
+        };
+
+        let notebook_id = notebook.id;
+
+        // Add to parent if exists
+        if let Some(parent_id) = notebook.parent_id {
+            if let Some(parent) = self.snippet_database.notebooks.get_mut(&parent_id) {
+                parent.add_child(notebook_id);
+            }
+        } else {
+            self.snippet_database.root_notebooks.push(notebook_id);
+        }
+
+        self.snippet_database
+            .notebooks
+            .insert(notebook_id, notebook);
+
+        if let Err(e) = self.save_database() {
+            return Err(format!("Failed to save notebook: {}", e));
+        }
+
+        self.refresh_tree_items();
+        Ok(notebook_id)
+    }
+
+    pub fn create_snippet(
+        &mut self,
+        title: String,
+        language: SnippetLanguage,
+        notebook_id: Uuid,
+    ) -> Result<Uuid, String> {
+        if title.trim().is_empty() {
+            return Err("Snippet title cannot be empty".to_string());
+        }
+
+        if !self.snippet_database.notebooks.contains_key(&notebook_id) {
+            return Err("Notebook not found".to_string());
+        }
+
+        let snippet = CodeSnippet::new(title, language, notebook_id);
+        let snippet_id = snippet.id;
+
+        self.snippet_database.snippets.insert(snippet_id, snippet);
+
+        // Update notebook snippet count
+        if let Some(notebook) = self.snippet_database.notebooks.get_mut(&notebook_id) {
+            notebook.update_snippet_count(
+                self.snippet_database
+                    .snippets
+                    .values()
+                    .filter(|s| s.notebook_id == notebook_id)
+                    .count(),
+            );
+        }
+
+        if let Err(e) = self.save_database() {
+            return Err(format!("Failed to save snippet: {}", e));
+        }
+
+        self.refresh_tree_items();
+        Ok(snippet_id)
+    }
+
+    pub fn delete_notebook(&mut self, notebook_id: Uuid) -> Result<(), String> {
+        // Check if notebook exists
+        if !self.snippet_database.notebooks.contains_key(&notebook_id) {
+            return Err("Notebook not found".to_string());
+        }
+
+        // Delete all snippets in this notebook
+        let snippet_ids: Vec<_> = self
+            .snippet_database
+            .snippets
+            .values()
+            .filter(|s| s.notebook_id == notebook_id)
+            .map(|s| s.id)
+            .collect();
+
+        for snippet_id in snippet_ids {
+            self.delete_snippet(snippet_id)?;
+        }
+
+        // Remove from parent's children or root list
+        if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id) {
+            if let Some(parent_id) = notebook.parent_id {
+                if let Some(parent) = self.snippet_database.notebooks.get_mut(&parent_id) {
+                    parent.remove_child(&notebook_id);
+                }
+            } else {
+                self.snippet_database
+                    .root_notebooks
+                    .retain(|&id| id != notebook_id);
+            }
+        }
+
+        // Delete the notebook
+        self.snippet_database.notebooks.remove(&notebook_id);
+
+        // Delete notebook directory
+        if let Some(ref storage) = self.storage_manager {
+            if let Err(e) = storage.delete_notebook_directory(notebook_id) {
+                eprintln!("Warning: Failed to delete notebook directory: {}", e);
+            }
+        }
+
+        if let Err(e) = self.save_database() {
+            return Err(format!("Failed to save changes: {}", e));
+        }
+
+        self.refresh_tree_items();
+        Ok(())
+    }
+
+    pub fn delete_snippet(&mut self, snippet_id: Uuid) -> Result<(), String> {
+        if let Some(snippet) = self.snippet_database.snippets.remove(&snippet_id) {
+            // Delete snippet file
+            if let Some(ref storage) = self.storage_manager {
+                if let Err(e) = storage.delete_snippet_file(&snippet) {
+                    eprintln!("Warning: Failed to delete snippet file: {}", e);
+                }
+            }
+
+            // Update notebook snippet count
+            if let Some(notebook) = self
+                .snippet_database
+                .notebooks
+                .get_mut(&snippet.notebook_id)
+            {
+                notebook.update_snippet_count(
+                    self.snippet_database
+                        .snippets
+                        .values()
+                        .filter(|s| s.notebook_id == snippet.notebook_id)
+                        .count(),
+                );
+            }
+
+            if let Err(e) = self.save_database() {
+                return Err(format!("Failed to save changes: {}", e));
+            }
+
+            self.refresh_tree_items();
+            Ok(())
+        } else {
+            Err("Snippet not found".to_string())
+        }
+    }
+
+    pub fn get_selected_item(&self) -> Option<&TreeItem> {
+        self.tree_items.get(self.selected_tree_item)
+    }
+
+    pub fn save_database(&self) -> Result<(), String> {
+        if let Some(ref storage) = self.storage_manager {
+            storage
+                .save_database(&self.snippet_database)
+                .map_err(|e| e.to_string())
+        } else {
+            Err("Storage manager not available".to_string())
+        }
+    }
+
+    pub fn set_error_message(&mut self, message: String) {
+        self.error_message = Some(message);
+        self.success_message = None;
+    }
+
+    pub fn set_success_message(&mut self, message: String) {
+        self.success_message = Some(message);
+        self.error_message = None;
+    }
+
+    pub fn clear_messages(&mut self) {
+        self.error_message = None;
+        self.success_message = None;
+    }
+
+    /// Call this periodically to auto-clear messages after a timeout
+    pub fn tick(&mut self) {
+        // Messages will be cleared by user interaction or manual clearing
+        // This is a placeholder for future auto-clear functionality
+    }
+
     /// Renders the current application state to the terminal frame
     ///
     /// This is the main rendering dispatch method that determines which UI rendering
@@ -175,9 +521,7 @@ impl App {
             AppState::Marketplace => {
                 components::render_wip_dialog(frame, frame.area(), "🛒 Marketplace", self)
             }
-            AppState::CodeSnippets => {
-                components::render_wip_dialog(frame, frame.area(), "📝 Code Snippets", self)
-            }
+            AppState::CodeSnippets => code_snippets::render(frame, self),
             AppState::InfoPage => {
                 components::render_wip_dialog(frame, frame.area(), "ℹ️ About", self)
             }

@@ -6,6 +6,7 @@
 use crate::app::App;
 use crate::ui::colors::RosePine;
 use crate::ui::components::render_bottom_bar;
+use chrono::{DateTime, Utc};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -30,12 +31,25 @@ pub fn render(frame: &mut Frame, app: &App) {
     let inner_area = block.inner(main_area);
     block.render(main_area, frame.buffer_mut());
 
-    let main_chunks = Layout::vertical([
-        Constraint::Fill(1),   // Main content area (title + disclaimer + menu)
-        Constraint::Length(3), // Description area
-        Constraint::Length(3), // Bottom navigation bar
-    ])
-    .split(inner_area);
+    // Adjust layout based on whether we have snippets to show
+    let has_recent_snippets = !app.snippet_database.snippets.is_empty();
+
+    let main_chunks = if has_recent_snippets {
+        Layout::vertical([
+            Constraint::Fill(1),   // Main content area (title + disclaimer + menu)
+            Constraint::Length(2), // Description area
+            Constraint::Length(8), // Recent snippets area
+            Constraint::Length(3), // Bottom navigation bar
+        ])
+        .split(inner_area)
+    } else {
+        Layout::vertical([
+            Constraint::Fill(1),   // Main content area (title + disclaimer + menu)
+            Constraint::Length(3), // Description area (larger when no snippets)
+            Constraint::Length(3), // Bottom navigation bar
+        ])
+        .split(inner_area)
+    };
 
     let content_area = Layout::horizontal([
         Constraint::Fill(1),
@@ -57,7 +71,13 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_disclaimer(frame, content_chunks[2]);
     render_menu(frame, content_chunks[3], app);
     render_description(frame, main_chunks[1], app);
-    render_bottom_bar(frame, main_chunks[2], app);
+
+    if has_recent_snippets {
+        render_recent_snippets(frame, main_chunks[2], app);
+        render_bottom_bar(frame, main_chunks[3], app);
+    } else {
+        render_bottom_bar(frame, main_chunks[2], app);
+    }
 }
 
 /// Renders the ASCII art title with elegant typography
@@ -116,9 +136,9 @@ fn render_menu(frame: &mut Frame, area: Rect, app: &App) {
     let menu_items = vec![
         ("󰈮", "Boilerplates", "b"),
         ("󱣒", "Marketplace", "m"),
-        ("", "Code Snippets", "s"),
-        ("", "About", "i"),
-        ("", "Settings", "c"),
+        ("", "Code Snippets", "s"),
+        ("", "About", "i"),
+        ("", "Settings", "c"),
         ("󰈆", "Exit", "q"),
     ];
 
@@ -190,4 +210,67 @@ fn render_description(frame: &mut Frame, area: Rect, app: &App) {
         .style(Style::default().fg(RosePine::MUTED));
 
     description_paragraph.render(area, frame.buffer_mut());
+}
+
+/// Renders recent snippets section below the main content
+fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
+    let block = Block::bordered()
+        .title(" 🕒 Recent Snippets ")
+        .title_alignment(Alignment::Center)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE));
+
+    let inner_area = block.inner(area);
+    block.render(area, frame.buffer_mut());
+
+    // Get most recently accessed snippets
+    let mut recent_snippets: Vec<_> = app.snippet_database.snippets.values().collect();
+    recent_snippets.sort_by(|a, b| b.accessed_at.cmp(&a.accessed_at));
+    recent_snippets.truncate(3); // Show only 3 most recent for compact layout
+
+    if recent_snippets.is_empty() {
+        let empty_text = Paragraph::new("No snippets accessed yet. Press 's' to create some!")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(RosePine::MUTED));
+        empty_text.render(inner_area, frame.buffer_mut());
+        return;
+    }
+
+    let items: Vec<ListItem> = recent_snippets
+        .iter()
+        .map(|snippet| {
+            let icon = snippet.language.icon();
+            let notebook_name = app
+                .snippet_database
+                .notebooks
+                .get(&snippet.notebook_id)
+                .map(|n| n.name.as_str())
+                .unwrap_or("Unknown");
+
+            let ago = format_time_ago(&snippet.accessed_at);
+            let content = format!("{} {} • {} • {}", icon, snippet.title, notebook_name, ago);
+
+            ListItem::new(content).style(Style::default().fg(RosePine::TEXT))
+        })
+        .collect();
+
+    let list = List::new(items).style(Style::default().fg(RosePine::TEXT));
+
+    list.render(inner_area, frame.buffer_mut());
+}
+
+/// Format time difference as human-readable string
+fn format_time_ago(datetime: &DateTime<Utc>) -> String {
+    let now = Utc::now();
+    let duration = now.signed_duration_since(*datetime);
+
+    if duration.num_days() > 0 {
+        format!("{} days ago", duration.num_days())
+    } else if duration.num_hours() > 0 {
+        format!("{} hours ago", duration.num_hours())
+    } else if duration.num_minutes() > 0 {
+        format!("{} min ago", duration.num_minutes())
+    } else {
+        "Just now".to_string()
+    }
 }

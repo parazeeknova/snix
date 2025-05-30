@@ -13,15 +13,21 @@
 use color_eyre::eyre::Result;
 use ratatui::{
     DefaultTerminal,
-    crossterm::event::{self, Event},
+    crossterm::{
+        event::{self, Event},
+        execute,
+        terminal::{LeaveAlternateScreen, disable_raw_mode},
+    },
 };
 
 mod app;
 mod handlers;
+mod models;
 mod ui;
 
 use app::App;
 use handlers::keys::handle_key_events;
+use std::io::stdout;
 
 /// Application entry point and initialization
 ///
@@ -38,6 +44,10 @@ fn main() -> Result<()> {
     let terminal = ratatui::init();
     let result = run(terminal);
     ratatui::restore();
+
+    disable_raw_mode()?;
+    execute!(stdout(), LeaveAlternateScreen)?;
+    print!("\x1B[2J\x1B[3J\x1B[H"); // Final cleanup
 
     result
 }

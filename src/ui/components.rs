@@ -41,13 +41,8 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
                 .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH)),
         );
 
-    let back_hint = if app.can_go_back() {
-        " [←] Back │ "
-    } else {
-        ""
-    };
-
-    let shortcuts = format!("{} [↑↓] Navigate │  [⏎] Select │  [q] Quit ", back_hint);
+    // Get context-aware shortcuts
+    let shortcuts = get_context_shortcuts(app);
 
     let right_content = Paragraph::new(shortcuts)
         .alignment(Alignment::Right)
@@ -60,6 +55,55 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
 
     left_content.render(navbar_chunks[0], frame.buffer_mut());
     right_content.render(navbar_chunks[1], frame.buffer_mut());
+}
+
+/// Get keyboard shortcuts based on current context
+fn get_context_shortcuts(app: &App) -> String {
+    use crate::app::{AppState, InputMode};
+
+    let back_hint = if app.can_go_back() {
+        " [←] Back │ "
+    } else {
+        ""
+    };
+
+    match (&app.state, &app.input_mode) {
+        // Input modes have specific shortcuts
+        (_, InputMode::CreateNotebook | InputMode::CreateSnippet | InputMode::Search) => {
+            format!(" [⏎] Confirm │ [Esc] Cancel ")
+        }
+        (_, InputMode::SelectLanguage) => {
+            format!(" [↑↓] Navigate │ [⏎] Select │ [Esc] Cancel ")
+        }
+
+        // Start page shortcuts
+        (AppState::StartPage, InputMode::Normal) => {
+            format!(
+                "{} [↑↓] Navigate │ [⏎] Select │ [b] Boilerplates │ [s] Snippets │ [q] Quit ",
+                back_hint
+            )
+        }
+
+        // Code snippets page shortcuts
+        (AppState::CodeSnippets, InputMode::Normal) => {
+            if app.snippet_database.notebooks.is_empty() {
+                format!("{} [n] New Notebook │ [h] Home │ [q] Quit ", back_hint)
+            } else {
+                format!(
+                    "{} [↑↓] Navigate │ [⏎] Edit │ [n] Notebook │ [s] Snippet │ [d] Delete │ [/] Search │ [h] Home ",
+                    back_hint
+                )
+            }
+        }
+
+        // Other pages
+        _ => {
+            format!(
+                "{} [↑↓] Navigate │ [⏎] Select │ [h] Home │ [q] Quit ",
+                back_hint
+            )
+        }
+    }
 }
 
 /// Constructs the breadcrumb navigation trail with appropriate styling and symbols

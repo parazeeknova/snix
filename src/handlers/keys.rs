@@ -8,8 +8,9 @@
 //! single-letter shortcuts for quick access to different application sections. It also
 //! handles global actions like quitting the application and back navigation.
 
-use crate::app::{App, AppState};
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use crate::app::{App, AppState, CodeSnippetsState, InputMode, TreeItem};
+use crate::models::SnippetLanguage;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Main keyboard event handler and dispatcher
 ///
@@ -32,9 +33,20 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 /// - `false` if the application should continue running
 
 pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
+    // Handle input mode first for code snippets
+    if app.state == AppState::CodeSnippets && app.input_mode != InputMode::Normal {
+        return handle_input_mode_keys(key, app);
+    }
+
     match key.code {
         // Global quit command - works from any page
-        KeyCode::Char('q') | KeyCode::Char('Q') => return true,
+        KeyCode::Char('q') | KeyCode::Char('Q') => {
+            // Only quit from start page or when not in edit mode
+            if app.state == AppState::StartPage || app.state != AppState::CodeSnippets {
+                return true;
+            }
+            false
+        }
 
         // Global back navigation - only works if there's history to go back to
         KeyCode::Backspace => {
@@ -47,9 +59,538 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
         // Route to state-specific key handlers
         _ => match app.state {
             AppState::StartPage => handle_start_page_keys(key, app),
+            AppState::CodeSnippets => handle_code_snippets_keys(key, app),
             _ => handle_other_page_keys(key, app),
         },
     }
+}
+
+/// Handles keyboard input for input mode in code snippets
+fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.input_mode = InputMode::Normal;
+            app.input_buffer.clear();
+            app.pending_snippet_title.clear();
+            app.clear_messages();
+            false
+        }
+        KeyCode::Enter => {
+            let input = app.input_buffer.trim().to_string();
+            app.input_buffer.clear();
+
+            match app.input_mode.clone() {
+                InputMode::CreateNotebook => {
+                    if !input.is_empty() {
+                        match app.create_notebook(input) {
+                            Ok(_) => {
+                                app.set_success_message(
+                                    "Notebook created successfully!".to_string(),
+                                );
+                            }
+                            Err(e) => {
+                                app.set_error_message(e);
+                            }
+                        }
+                    }
+                    app.input_mode = InputMode::Normal;
+                }
+                InputMode::CreateSnippet => {
+                    if !input.is_empty() {
+                        app.pending_snippet_title = input;
+                        app.input_mode = InputMode::SelectLanguage;
+                        app.selected_language = 0;
+                        app.clear_messages();
+                    } else {
+                        app.input_mode = InputMode::Normal;
+                        app.clear_messages();
+                    }
+                }
+                InputMode::SelectLanguage => {
+                    // This shouldn't happen with Enter, language selection uses different keys
+                    app.input_mode = InputMode::Normal;
+                    app.pending_snippet_title.clear();
+                    app.clear_messages();
+                }
+                InputMode::Search => {
+                    // TODO: Implement search
+                    app.search_query = input;
+                    app.input_mode = InputMode::Normal;
+                    app.code_snippets_state = CodeSnippetsState::SearchSnippets;
+                    app.clear_messages();
+                }
+                _ => {
+                    app.input_mode = InputMode::Normal;
+                    app.clear_messages();
+                }
+            }
+            false
+        }
+        KeyCode::Backspace => {
+            if !app.input_buffer.is_empty() {
+                app.input_buffer.pop();
+            }
+            false
+        }
+        KeyCode::Up | KeyCode::Char('k') if app.input_mode == InputMode::SelectLanguage => {
+            app.selected_language = if app.selected_language == 0 {
+                get_available_languages().len() - 1
+            } else {
+                app.selected_language - 1
+            };
+            false
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.input_mode == InputMode::SelectLanguage => {
+            app.selected_language = (app.selected_language + 1) % get_available_languages().len();
+            false
+        }
+        KeyCode::Char(c) => {
+            if app.input_mode != InputMode::SelectLanguage {
+                app.input_buffer.push(c);
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Get list of available languages for snippet creation
+fn get_available_languages() -> Vec<SnippetLanguage> {
+    vec![
+        SnippetLanguage::Rust,
+        SnippetLanguage::JavaScript,
+        SnippetLanguage::TypeScript,
+        SnippetLanguage::Python,
+        SnippetLanguage::Go,
+        SnippetLanguage::Java,
+        SnippetLanguage::C,
+        SnippetLanguage::Cpp,
+        SnippetLanguage::CSharp,
+        SnippetLanguage::PHP,
+        SnippetLanguage::Ruby,
+        SnippetLanguage::Swift,
+        SnippetLanguage::Kotlin,
+        SnippetLanguage::Dart,
+        SnippetLanguage::HTML,
+        SnippetLanguage::CSS,
+        SnippetLanguage::SCSS,
+        SnippetLanguage::SQL,
+        SnippetLanguage::Bash,
+        SnippetLanguage::PowerShell,
+        SnippetLanguage::Yaml,
+        SnippetLanguage::Json,
+        SnippetLanguage::Xml,
+        SnippetLanguage::Markdown,
+        SnippetLanguage::Dockerfile,
+        SnippetLanguage::Toml,
+        SnippetLanguage::Ini,
+        SnippetLanguage::Config,
+        SnippetLanguage::Text,
+    ]
+}
+
+/// Handles keyboard input specifically for the code snippets page
+fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
+    match app.code_snippets_state {
+        CodeSnippetsState::NotebookList => handle_notebook_list_keys(key, app),
+        CodeSnippetsState::NotebookView { notebook_id } => {
+            handle_notebook_view_keys(key, app, notebook_id)
+        }
+        CodeSnippetsState::SnippetEditor { snippet_id } => {
+            handle_snippet_editor_keys(key, app, snippet_id)
+        }
+        CodeSnippetsState::SearchSnippets => handle_search_keys(key, app),
+        _ => handle_other_snippets_keys(key, app),
+    }
+}
+
+/// Handles keys for the main notebook list view
+fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
+    // Clear messages on most interactions (except when in special modes)
+    if app.input_mode == InputMode::Normal {
+        match key.code {
+            KeyCode::Esc
+            | KeyCode::Enter
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Char('j')
+            | KeyCode::Char('k')
+            | KeyCode::Char('h')
+            | KeyCode::Char('H') => {
+                app.clear_messages();
+            }
+            _ => {}
+        }
+    }
+
+    // Handle language selection first
+    if app.input_mode == InputMode::SelectLanguage {
+        match key.code {
+            KeyCode::Enter => {
+                let languages = get_available_languages();
+                if let Some(selected_language) = languages.get(app.selected_language) {
+                    if let Some(notebook_id) = get_current_notebook_id(app) {
+                        match app.create_snippet(
+                            app.pending_snippet_title.clone(),
+                            selected_language.clone(),
+                            notebook_id,
+                        ) {
+                            Ok(_) => {
+                                app.set_success_message(
+                                    "Snippet created successfully!".to_string(),
+                                );
+                            }
+                            Err(e) => {
+                                app.set_error_message(e);
+                            }
+                        }
+                    } else {
+                        app.set_error_message("Please select a notebook first".to_string());
+                    }
+                }
+                app.input_mode = InputMode::Normal;
+                app.pending_snippet_title.clear();
+                return false;
+            }
+            KeyCode::Esc => {
+                app.input_mode = InputMode::Normal;
+                app.pending_snippet_title.clear();
+                app.clear_messages();
+                return false;
+            }
+            _ => return false,
+        }
+    }
+
+    match key.code {
+        // Navigation in tree view
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.previous_tree_item();
+            false
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.next_tree_item();
+            false
+        }
+
+        // Enter selected item (notebook or snippet)
+        KeyCode::Enter => {
+            if let Some(selected_item) = app.get_selected_item().cloned() {
+                match selected_item {
+                    TreeItem::Notebook(notebook_id) => {
+                        app.current_notebook_id = Some(notebook_id);
+                        app.code_snippets_state = CodeSnippetsState::NotebookView { notebook_id };
+                    }
+                    TreeItem::Snippet(snippet_id) => {
+                        // Mark as accessed and launch editor
+                        if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
+                            snippet.mark_accessed();
+                        }
+
+                        // Save the database first
+                        let _ = app.save_database();
+
+                        // Launch external editor
+                        launch_external_editor(app, snippet_id);
+
+                        // Return to main view after editing
+                        app.code_snippets_state = CodeSnippetsState::NotebookList;
+                    }
+                }
+            }
+            false
+        }
+
+        // Create new notebook
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            app.clear_messages();
+            app.input_mode = InputMode::CreateNotebook;
+            app.input_buffer.clear();
+            false
+        }
+
+        // Create new snippet (in current notebook or first available)
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            app.clear_messages();
+            if app.snippet_database.notebooks.is_empty() {
+                app.set_error_message("Create a notebook first".to_string());
+            } else {
+                app.input_mode = InputMode::CreateSnippet;
+                app.input_buffer.clear();
+            }
+            false
+        }
+
+        // Delete selected item
+        KeyCode::Delete | KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.clear_messages();
+            if let Some(selected_item) = app.get_selected_item().cloned() {
+                match selected_item {
+                    TreeItem::Notebook(notebook_id) => {
+                        // Show confirmation for notebook deletion
+                        if let Some(notebook) = app.snippet_database.notebooks.get(&notebook_id) {
+                            if notebook.snippet_count > 0 {
+                                app.set_error_message(format!("Cannot delete '{}': contains {} snippets. Delete snippets first.", notebook.name, notebook.snippet_count));
+                            } else {
+                                match app.delete_notebook(notebook_id) {
+                                    Ok(_) => {
+                                        app.set_success_message(
+                                            "Notebook deleted successfully!".to_string(),
+                                        );
+                                    }
+                                    Err(e) => {
+                                        app.set_error_message(e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    TreeItem::Snippet(snippet_id) => {
+                        if let Some(snippet) = app.snippet_database.snippets.get(&snippet_id) {
+                            let snippet_name = snippet.title.clone();
+                            match app.delete_snippet(snippet_id) {
+                                Ok(_) => {
+                                    app.set_success_message(format!(
+                                        "Snippet '{}' deleted successfully!",
+                                        snippet_name
+                                    ));
+                                }
+                                Err(e) => {
+                                    app.set_error_message(e);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                app.set_error_message("No item selected to delete".to_string());
+            }
+            false
+        }
+
+        // Search snippets
+        KeyCode::Char('/') => {
+            app.clear_messages();
+            app.input_mode = InputMode::Search;
+            app.input_buffer.clear();
+            false
+        }
+
+        // Refresh tree view
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.clear_messages();
+            app.refresh_tree_items();
+            app.set_success_message("Tree view refreshed".to_string());
+            false
+        }
+
+        // Toggle favorites filter
+        KeyCode::Char('f') => {
+            app.clear_messages();
+            app.show_favorites_only = !app.show_favorites_only;
+            app.refresh_tree_items();
+            let status = if app.show_favorites_only { "on" } else { "off" };
+            app.set_success_message(format!("Favorites filter: {}", status));
+            false
+        }
+
+        // Settings
+        KeyCode::Char(',') => {
+            app.clear_messages();
+            app.code_snippets_state = CodeSnippetsState::Settings;
+            false
+        }
+
+        // Back/Escape
+        KeyCode::Esc => {
+            app.clear_messages();
+            if app.can_go_back() {
+                app.go_back();
+            }
+            false
+        }
+
+        // Home
+        KeyCode::Char('h') | KeyCode::Char('H') => {
+            app.clear_messages();
+            app.page_history.clear();
+            app.state = AppState::StartPage;
+            false
+        }
+
+        // Clear messages manually
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_messages();
+            false
+        }
+
+        _ => false,
+    }
+}
+
+/// Handles keys for notebook view
+fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::Uuid) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.code_snippets_state = CodeSnippetsState::NotebookList;
+            app.current_notebook_id = None;
+            false
+        }
+        // Add more notebook-specific keys here
+        _ => false,
+    }
+}
+
+/// Handles keys for snippet editor
+fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, _snippet_id: uuid::Uuid) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.code_snippets_state = CodeSnippetsState::NotebookList;
+            false
+        }
+        // The actual editing happens in external editor
+        _ => false,
+    }
+}
+
+/// Handles keys for search view
+fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.code_snippets_state = CodeSnippetsState::NotebookList;
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Handles keys for other snippet states
+fn handle_other_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.code_snippets_state = CodeSnippetsState::NotebookList;
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Get the current notebook ID for creating snippets
+fn get_current_notebook_id(app: &App) -> Option<uuid::Uuid> {
+    // If we have a current notebook selected, use that
+    if let Some(id) = app.current_notebook_id {
+        return Some(id);
+    }
+
+    // Try to get notebook from selected tree item
+    if let Some(TreeItem::Notebook(id)) = app.get_selected_item() {
+        return Some(*id);
+    }
+
+    // If selected item is a snippet, get its notebook
+    if let Some(TreeItem::Snippet(snippet_id)) = app.get_selected_item() {
+        if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+            return Some(snippet.notebook_id);
+        }
+    }
+
+    // Fall back to first available notebook
+    app.snippet_database.root_notebooks.first().copied()
+}
+
+/// Launch external editor for snippet editing
+/// Launch external editor for snippet editing
+fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
+    if let Some(snippet) = app.snippet_database.snippets.get(&snippet_id) {
+        if let Some(ref storage) = app.storage_manager {
+            let file_path = storage.get_snippet_file_path(snippet);
+
+            // Ensure the file exists with current content
+            if let Err(e) = storage.save_snippet_content(snippet) {
+                app.set_error_message(format!("Failed to prepare file for editing: {}", e));
+                return;
+            }
+
+            // Properly suspend the current TUI application
+            if let Err(e) = suspend_tui_for_editor(&file_path) {
+                app.set_error_message(format!("Failed to launch editor: {}", e));
+                return;
+            }
+
+            // Reload snippet content after editing
+            if let Ok(content) = storage.load_snippet_content(
+                snippet.id,
+                snippet.notebook_id,
+                &snippet.file_extension,
+            ) {
+                if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
+                    snippet.update_content(content);
+
+                    // Save changes
+                    if let Err(e) = storage.save_snippet_content(snippet) {
+                        app.set_error_message(format!("Failed to save snippet: {}", e));
+                    } else {
+                        if let Err(e) = app.save_database() {
+                            app.set_error_message(format!("Failed to save database: {}", e));
+                        } else {
+                            app.set_success_message("Snippet saved successfully!".to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Properly suspend TUI and launch external editor
+fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    use ratatui::crossterm::{
+        execute,
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    };
+    use std::io::{Write, stdout};
+
+    // Leave alternate screen and disable raw mode
+    execute!(stdout(), LeaveAlternateScreen)?;
+    disable_raw_mode()?;
+
+    // Clear the screen completely
+    print!("\x1B[2J\x1B[3J\x1B[H"); // Clear screen, scrollback, and move cursor to home
+    stdout().flush()?;
+
+    // Try to launch editors in order of preference
+    let editors = ["nvim", "vim", "nano"];
+    let mut editor_launched = false;
+
+    for editor in &editors {
+        if let Ok(mut child) = std::process::Command::new(editor).arg(file_path).spawn() {
+            // Wait for editor to close
+            if let Ok(_) = child.wait() {
+                editor_launched = true;
+                break;
+            }
+        }
+    }
+
+    if !editor_launched {
+        // Restore terminal state even if editor failed
+        enable_raw_mode()?;
+        execute!(stdout(), EnterAlternateScreen)?;
+        // Force clear everything again
+        print!("\x1B[2J\x1B[3J\x1B[H");
+        stdout().flush()?;
+        return Err("Could not launch any editor (nvim, vim, nano)".into());
+    }
+
+    // Restore terminal state
+    enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen)?;
+
+    // Force clear everything to ensure clean state
+    print!("\x1B[2J\x1B[3J\x1B[H");
+    stdout().flush()?;
+
+    Ok(())
 }
 
 /// Handles keyboard input specifically for the start page (main menu)
