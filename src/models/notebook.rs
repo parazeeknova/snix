@@ -61,37 +61,4 @@ impl Notebook {
         self.snippet_count = count;
         self.updated_at = Utc::now();
     }
-
-    pub fn _is_root(&self) -> bool {
-        self.parent_id.is_none()
-    }
-
-    pub fn _has_children(&self) -> bool {
-        !self.children.is_empty()
-    }
-
-    /// Add a tag to the notebook
-    pub fn _add_tag(&mut self, tag: String) {
-        if !self.tags.contains(&tag) {
-            self.tags.push(tag);
-            self.updated_at = Utc::now();
-        }
-    }
-
-    /// Remove a tag from the notebook
-    pub fn _remove_tag(&mut self, tag: &str) {
-        self.tags.retain(|t| t != tag);
-        self.updated_at = Utc::now();
-    }
-
-    /// Set a metadata value
-    pub fn _set_metadata(&mut self, key: String, value: String) {
-        self.metadata.insert(key, value);
-        self.updated_at = Utc::now();
-    }
-
-    /// Get a metadata value
-    pub fn _get_metadata(&self, key: &str) -> Option<&String> {
-        self.metadata.get(key)
-    }
 }

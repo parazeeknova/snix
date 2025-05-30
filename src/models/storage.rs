@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,124 +129,5 @@ impl StorageManager {
         self.snippets_dir
             .join(snippet.notebook_id.to_string())
             .join(filename)
-    }
-
-    /// Export a notebook to a file
-    pub fn _export_notebook(
-        &self,
-        notebook_id: Uuid,
-        db: &SnippetDatabase,
-        export_path: &Path,
-    ) -> Result<PathBuf> {
-        let notebook = db
-            .notebooks
-            .get(&notebook_id)
-            .context("Notebook not found")?;
-
-        let export_dir = export_path.join(&notebook.name);
-        fs::create_dir_all(&export_dir)?;
-
-        // Export notebook metadata
-        let metadata = serde_json::to_string_pretty(notebook)?;
-        fs::write(export_dir.join("notebook.json"), metadata)?;
-
-        // Export all snippets in this notebook
-        for snippet in db.snippets.values() {
-            if snippet.notebook_id == notebook_id {
-                let content = self.load_snippet_content(
-                    snippet.id,
-                    snippet.notebook_id,
-                    &snippet.file_extension,
-                )?;
-
-                let filename = format!(
-                    "{}.{}",
-                    snippet.title.replace(' ', "_"),
-                    snippet.file_extension
-                );
-                fs::write(export_dir.join(filename), content)?;
-            }
-        }
-
-        Ok(export_dir)
-    }
-
-    /// Import a notebook from a file
-    pub fn _import_notebook(&self, import_path: &Path, db: &mut SnippetDatabase) -> Result<Uuid> {
-        let metadata_file = import_path.join("notebook.json");
-
-        if !metadata_file.exists() {
-            return Err(anyhow::anyhow!(
-                "Invalid notebook export: missing notebook.json"
-            ));
-        }
-
-        let metadata_content = fs::read_to_string(metadata_file)?;
-        let mut notebook: Notebook = serde_json::from_str(&metadata_content)?;
-
-        // Generate new ID to avoid conflicts
-        let _old_id = notebook.id;
-        notebook.id = Uuid::new_v4();
-        let new_notebook_id = notebook.id; // Store the ID before moving
-
-        // Import all snippet files
-        for entry in fs::read_dir(import_path)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_file() && path.file_name() != Some(std::ffi::OsStr::new("notebook.json")) {
-                // Try to extract filename and extension
-                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                    if let Some((title, _extension)) = filename.rsplit_once('.') {
-                        let content = fs::read_to_string(&path)?;
-                        let extension = if let Some(ext) = Path::new(&filename).extension() {
-                            ext.to_string_lossy().to_string()
-                        } else {
-                            "txt".to_string()
-                        };
-
-                        let language = crate::models::SnippetLanguage::_from_extension(&extension);
-
-                        let mut snippet = CodeSnippet::new(
-                            title.replace('_', " ").to_string(),
-                            language,
-                            new_notebook_id,
-                        );
-                        snippet.update_content(content);
-
-                        self.save_snippet_content(&snippet)?;
-                        db.snippets.insert(snippet.id, snippet);
-                    }
-                }
-            }
-        }
-
-        db.notebooks.insert(new_notebook_id, notebook);
-        db.root_notebooks.push(new_notebook_id);
-
-        Ok(new_notebook_id)
-    }
-
-    /// Backup the database to a timestamped file
-    pub fn _backup_database(&self) -> Result<PathBuf> {
-        let backup_dir = self._data_dir.join("backups");
-        fs::create_dir_all(&backup_dir)?;
-
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup_file = backup_dir.join(format!("backup_{}.json", timestamp));
-
-        fs::copy(&self.database_file, &backup_file)?;
-
-        Ok(backup_file)
-    }
-
-    /// Get the data directory path
-    pub fn _get_data_directory(&self) -> &Path {
-        &self._data_dir
-    }
-
-    /// Get the snippets directory path
-    pub fn _get_snippets_directory(&self) -> &Path {
-        &self.snippets_dir
     }
 }

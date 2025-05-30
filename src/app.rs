@@ -1,14 +1,3 @@
-//! Application State Management Module
-//!
-//! This module contains the core application state management logic for RustUI.
-//! It defines the main application states, handles navigation between different
-//! pages, manages user interface state, and controls the overall flow of the
-//! application.
-//!
-//! The module provides a clean separation between UI rendering and state management,
-//! making it easy to add new pages and features while maintaining a consistent
-//! navigation experience.
-
 use crate::models::{CodeSnippet, Notebook, SnippetDatabase, SnippetLanguage, StorageManager};
 use crate::ui::{code_snippets, components, start_page};
 use ratatui::Frame;
@@ -42,7 +31,6 @@ impl Default for AppState {
     }
 }
 
-/// Code Snippets Page Sub-States
 #[derive(Debug, Clone, PartialEq)]
 pub enum CodeSnippetsState {
     NotebookList,
@@ -70,12 +58,7 @@ pub enum TreeItem {
 /// The App struct is the central hub for all state management and is passed
 /// to rendering functions to determine what content to display and how to
 /// style interactive elements based on the current state.
-///
-/// # Fields
-///
-/// - `state`: Current page/screen being displayed
-/// - `selected_menu_item`: Index of currently highlighted menu item (0-based)
-/// - `page_history`: Stack of previously visited pages for back navigation
+
 #[derive(Debug)]
 pub struct App {
     pub state: AppState,
@@ -122,10 +105,6 @@ impl App {
     /// Initializes the application in the StartPage state with the first menu item
     /// selected and an empty navigation history. This provides a clean starting
     /// point for the user interface.
-    ///
-    /// # Returns
-    ///
-    /// A new `App` instance ready to be used for rendering and event handling.
     pub fn new() -> Self {
         let storage_manager = StorageManager::new().ok();
         let snippet_database = if let Some(ref manager) = storage_manager {
@@ -193,10 +172,6 @@ impl App {
     ///
     /// This method is the primary way to move between different pages in the
     /// application and ensures that navigation history is properly maintained.
-    ///
-    /// # Parameters
-    ///
-    /// - `new_state`: The application state to navigate to
     pub fn navigate_to(&mut self, new_state: AppState) {
         if self.state != new_state {
             self.page_history.push(self.state.clone());
@@ -229,17 +204,11 @@ impl App {
     /// Returns true if there are states in the page history stack that the user
     /// can navigate back to. This is useful for conditionally showing back buttons
     /// or enabling back navigation shortcuts.
-    ///
-    /// # Returns
-    ///
-    /// - `true` if back navigation is available
-    /// - `false` if the user is at the root of the navigation stack
     pub fn can_go_back(&self) -> bool {
         !self.page_history.is_empty()
     }
 
     // Code Snippets Manager Methods
-
     pub fn refresh_tree_items(&mut self) {
         self.tree_items.clear();
 
@@ -260,7 +229,6 @@ impl App {
     fn add_notebook_to_tree(&mut self, notebook_id: Uuid, _depth: usize) {
         self.tree_items.push(TreeItem::Notebook(notebook_id));
 
-        // Add snippets in this notebook
         let snippets: Vec<_> = self
             .snippet_database
             .snippets
@@ -273,7 +241,6 @@ impl App {
             self.tree_items.push(TreeItem::Snippet(snippet_id));
         }
 
-        // Add child notebooks - clone to avoid borrowing issues
         if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id) {
             let children = notebook.children.clone();
             for child_id in children {
@@ -311,7 +278,6 @@ impl App {
 
         let notebook_id = notebook.id;
 
-        // Add to parent if exists
         if let Some(parent_id) = notebook.parent_id {
             if let Some(parent) = self.snippet_database.notebooks.get_mut(&parent_id) {
                 parent.add_child(notebook_id);
@@ -351,7 +317,6 @@ impl App {
 
         self.snippet_database.snippets.insert(snippet_id, snippet);
 
-        // Update notebook snippet count
         if let Some(notebook) = self.snippet_database.notebooks.get_mut(&notebook_id) {
             notebook.update_snippet_count(
                 self.snippet_database
@@ -500,10 +465,6 @@ impl App {
     /// states, it displays a work-in-progress dialog with appropriate page titles
     /// and icons, maintaining consistent navigation while indicating that those
     /// features are under development.
-    ///
-    /// # Parameters
-    ///
-    /// - `frame`: The ratatui Frame object to render to
     pub fn render(&self, frame: &mut Frame) {
         match self.state {
             AppState::StartPage => start_page::render(frame, self),

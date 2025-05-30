@@ -32,13 +32,9 @@ mod models;
 mod ui;
 
 /// Application entry point and initialization
-///
 /// This function initializes the terminal, sets up event handling, and
 /// runs the main application loop. It ensures proper terminal cleanup
 /// even if the application panics.
-///
-/// The function uses color-eyre for enhanced error reporting, which provides beautiful
-/// stack traces and helpful debugging information in case of panics or errors.
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Starting snix - Template & Boilerplate Manager");
     println!("Created by parazeeknova");
@@ -56,28 +52,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut should_quit = false;
 
     while !should_quit {
-        // Check if we need a full redraw
         if app.needs_redraw {
             force_redraw(&mut terminal, &app)?;
             app.needs_redraw = false;
         } else {
             terminal.draw(|frame| app.render(frame))?;
         }
-
-        // Wait for events with a timeout
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
                 should_quit = handlers::keys::handle_key_events(key, &mut app);
-
-                // Check if we need to fully redraw the UI (like after using editor)
                 if app.needs_redraw {
                     force_redraw(&mut terminal, &app)?;
                     app.needs_redraw = false;
                 }
             }
         }
-
-        // Handle app ticks (background tasks, auto-clearing messages, etc.)
         app._tick();
     }
 
@@ -89,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     terminal.show_cursor()?;
 
-    println!("Thanks for using RustUI! Goodbye!");
+    println!("Thanks for using snix! Goodbye!");
 
     Ok(())
 }
@@ -100,10 +89,7 @@ fn force_redraw<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &App,
 ) -> Result<(), Box<dyn Error>> {
-    // Clear the terminal completely
     terminal.clear()?;
-
-    // Do a full reset of the terminal
     use ratatui::crossterm::{
         execute,
         terminal::{Clear, ClearType},
@@ -111,8 +97,6 @@ fn force_redraw<B: ratatui::backend::Backend>(
     use std::io::stdout;
 
     execute!(stdout(), Clear(ClearType::All))?;
-
-    // Force two redraws to ensure clean state
     terminal.draw(|frame| app.render(frame))?;
     terminal.draw(|frame| app.render(frame))?;
 

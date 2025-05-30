@@ -1,8 +1,3 @@
-//! Start Page UI Module
-//!
-//! This module handles the rendering of the main start page (home screen) for snix.
-//! The start page serves as the primary navigation hub and landing screen, featuring:
-
 use crate::app::App;
 use crate::ui::colors::RosePine;
 use crate::ui::components::render_bottom_bar;

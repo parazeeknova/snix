@@ -3,35 +3,15 @@
 //! This module provides comprehensive keyboard input handling for the RustUI application.
 //! It processes all user keyboard interactions and translates them into appropriate
 //! application state changes, navigation actions, and menu interactions.
-//!
-//! The module supports both standard navigation keys (arrows, Enter, Esc) and convenient
-//! single-letter shortcuts for quick access to different application sections. It also
-//! handles global actions like quitting the application and back navigation.
 
 use crate::app::{App, AppState, CodeSnippetsState, InputMode, TreeItem};
 use crate::models::SnippetLanguage;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Main keyboard event handler and dispatcher
-///
 /// This is the primary entry point for all keyboard input processing. It receives
 /// key events from the terminal and routes them to appropriate specialized handlers
 /// based on the current application state.
-///
-/// The function implements a hierarchical key handling system:
-/// 1. First, it checks for global keys that work on any page (quit, back)
-/// 2. Then, it dispatches to state-specific handlers based on current page
-///
-/// # Parameters
-///
-/// - `key`: The keyboard event captured from the terminal
-/// - `app`: Mutable reference to the application state for modifications
-///
-/// # Returns
-///
-/// - `true` if the application should exit
-/// - `false` if the application should continue running
-
 pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
     // Handle input mode first for code snippets
     if app.state == AppState::CodeSnippets && app.input_mode != InputMode::Normal {
@@ -656,31 +636,6 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
 /// start page. It handles menu navigation (up/down movement), item selection,
 /// and provides convenient single-letter shortcuts for quick navigation to
 /// specific sections of the application.
-///
-/// The start page has a 6-item menu (indices 0-5):
-/// 0. Boilerplates (shortcut: 'b')
-/// 1. Marketplace (shortcut: 'm')
-/// 2. Code Snippets (shortcut: 's')
-/// 3. Info/About (shortcut: 'i')
-/// 4. Settings (shortcut: 'c')
-/// 5. Exit (Enter to quit)
-///
-/// # Parameters
-///
-/// - `key`: The keyboard event to process
-/// - `app`: Mutable reference to application state for menu and navigation updates
-///
-/// # Returns
-///
-/// - `true` if the user selected "Exit" (menu item 5)
-/// - `false` for all other actions (navigation, menu selection, etc.)
-///
-/// # Key Mappings
-///
-/// - Arrow keys and vi-style navigation (j/k) for menu movement
-/// - Enter to activate the currently selected menu item
-/// - Single letter shortcuts for direct navigation to specific pages
-/// - All shortcuts work with both lowercase and uppercase letters
 fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
     // Clear any previous messages
     app.clear_messages();
@@ -780,26 +735,6 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
 /// than the start page. Currently, all non-start pages show work-in-progress dialogs,
 /// so this handler primarily focuses on navigation commands to return to previous
 /// pages or the home page.
-///
-/// The function provides two ways to navigate away from the current page:
-/// 1. Standard back navigation (Esc) - returns to the previous page in history
-/// 2. Direct home navigation (h/H) - jumps directly to the start page, clearing history
-///
-/// # Parameters
-///
-/// - `key`: The keyboard event to process
-/// - `app`: Mutable reference to application state for navigation updates
-///
-/// # Returns
-///
-/// Always returns `false` since these pages don't have exit functionality.
-/// Users must return to the start page to access the exit option.
-///
-/// # Navigation Behavior
-///
-/// - `Esc`: Standard back navigation using the page history stack
-/// - `h/H`: Emergency home navigation that clears all history and returns to start page
-/// - All other keys are ignored on these pages
 fn handle_other_page_keys(key: KeyEvent, app: &mut App) -> bool {
     // Dismiss any messages with Enter key
     if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())

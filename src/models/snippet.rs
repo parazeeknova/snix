@@ -243,50 +243,11 @@ impl CodeSnippet {
         self.use_count += 1;
     }
 
-    pub fn _toggle_favorite(&mut self) {
-        self.is_favorite = !self.is_favorite;
-        self.updated_at = Utc::now();
-    }
-
-    pub fn _add_tag(&mut self, tag: String) {
-        if !self.tags.contains(&tag) {
-            self.tags.push(tag);
-            self.updated_at = Utc::now();
-        }
-    }
-
-    pub fn _remove_tag(&mut self, tag: &str) {
-        self.tags.retain(|t| t != tag);
-        self.updated_at = Utc::now();
-    }
-
-    pub fn _set_metadata(&mut self, key: String, value: String) {
-        self.metadata.insert(key, value);
-        self.updated_at = Utc::now();
-    }
-
-    pub fn _get_metadata(&self, key: &str) -> Option<&String> {
-        self.metadata.get(key)
-    }
-
-    pub fn _is_empty(&self) -> bool {
-        self.content.trim().is_empty()
-    }
-
     pub fn get_preview(&self, _max_lines: usize) -> String {
-        // Return the entire content, ignoring max_lines parameter
         self.content.clone()
     }
 
     pub fn get_line_count(&self) -> usize {
         self.content.lines().count()
-    }
-
-    pub fn _get_word_count(&self) -> usize {
-        self.content.split_whitespace().count()
-    }
-
-    pub fn _get_char_count(&self) -> usize {
-        self.content.chars().count()
     }
 }
