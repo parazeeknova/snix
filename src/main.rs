@@ -6,13 +6,14 @@ use ratatui::{
         style::Color,
     },
     layout::{Constraint, Layout},
-    style::Stylize,
-    widgets::{Block, List, ListItem, Paragraph, Widget},
+    style::{Style, Stylize},
+    widgets::{Block, List, ListItem, ListState, Paragraph, Widget},
 };
 
 #[derive(Debug, Default)]
 struct AppState {
     items: Vec<TodoItem>,
+    list_state: ListState,
 }
 
 #[derive(Debug, Default)]
@@ -29,7 +30,17 @@ fn main() -> Result<()> {
     // Demo states for debug
     state.items.push(TodoItem {
         is_done: false,
-        description: String::from("Debug"),
+        description: String::from("Debug 1"),
+    });
+
+    state.items.push(TodoItem {
+        is_done: false,
+        description: String::from("Debug 2"),
+    });
+
+    state.items.push(TodoItem {
+        is_done: false,
+        description: String::from("Debug 3"),
     });
 
     color_eyre::install()?;
@@ -53,6 +64,15 @@ fn run(mut terminal: DefaultTerminal, app_state: &mut AppState) -> Result<()> {
                 event::KeyCode::Esc => {
                     break;
                 }
+                event::KeyCode::Char(char) => match char {
+                    'k' => {
+                        app_state.list_state.select_previous();
+                    }
+                    'j' => {
+                        app_state.list_state.select_next();
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -60,7 +80,7 @@ fn run(mut terminal: DefaultTerminal, app_state: &mut AppState) -> Result<()> {
     Ok(())
 }
 
-fn render(frame: &mut Frame, app_state: &AppState) {
+fn render(frame: &mut Frame, app_state: &mut AppState) {
     // Paragraph::new("Starting RustyUI 0.1").render(frame.area(), frame.buffer_mut());
 
     let [border_area] = Layout::vertical([Constraint::Fill(1)])
@@ -76,11 +96,14 @@ fn render(frame: &mut Frame, app_state: &AppState) {
         .fg(Color::Yellow)
         .render(border_area, frame.buffer_mut());
 
-    List::new(
+    let list = List::new(
         app_state
             .items
             .iter()
             .map(|x| ListItem::from(x.description.clone())),
     )
-    .render(inner_area, frame.buffer_mut());
+    .highlight_symbol("> ")
+    .highlight_style(Style::default().fg(ratatui::style::Color::Green));
+
+    frame.render_stateful_widget(list, inner_area, &mut app_state.list_state);
 }
