@@ -47,8 +47,8 @@ impl Default for AppState {
 pub enum CodeSnippetsState {
     NotebookList,
     NotebookView { notebook_id: Uuid },
-    SnippetEditor { snippet_id: Uuid },
-    CreateNotebook,
+    _SnippetEditor { snippet_id: Uuid },
+    _CreateNotebook,
     CreateSnippet { notebook_id: Uuid },
     SearchSnippets,
     Settings,
@@ -90,25 +90,19 @@ pub struct App {
     pub tree_items: Vec<TreeItem>,
     pub current_notebook_id: Option<Uuid>,
     pub search_query: String,
-    pub filtered_snippets: Vec<Uuid>,
     pub show_favorites_only: bool,
-    pub sort_by: SortBy,
     pub error_message: Option<String>,
     pub success_message: Option<String>,
-    pub is_editing: bool,
     pub input_buffer: String,
     pub input_mode: InputMode,
     pub selected_language: usize,
     pub pending_snippet_title: String,
+    pub needs_redraw: bool, // Flag to indicate a full UI redraw is needed
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SortBy {
-    Name,
-    Created,
-    Updated,
-    Language,
-    UseCount,
+    _Updated,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,8 +112,8 @@ pub enum InputMode {
     CreateSnippet,
     SelectLanguage,
     Search,
-    RenameNotebook,
-    RenameSnippet,
+    _RenameNotebook,
+    _RenameSnippet,
 }
 
 impl App {
@@ -152,16 +146,14 @@ impl App {
             tree_items: Vec::new(),
             current_notebook_id: None,
             search_query: String::new(),
-            filtered_snippets: Vec::new(),
             show_favorites_only: false,
-            sort_by: SortBy::Updated,
             error_message: None,
             success_message: None,
-            is_editing: false,
             input_buffer: String::new(),
             input_mode: InputMode::Normal,
             selected_language: 0,
             pending_snippet_title: String::new(),
+            needs_redraw: true,
         };
 
         app.refresh_tree_items();
@@ -493,7 +485,7 @@ impl App {
     }
 
     /// Call this periodically to auto-clear messages after a timeout
-    pub fn tick(&mut self) {
+    pub fn _tick(&mut self) {
         // Messages will be cleared by user interaction or manual clearing
         // This is a placeholder for future auto-clear functionality
     }
@@ -516,17 +508,17 @@ impl App {
         match self.state {
             AppState::StartPage => start_page::render(frame, self),
             AppState::Boilerplates => {
-                components::render_wip_dialog(frame, frame.area(), "📦 Boilerplates", self)
+                components::render_wip_dialog(frame, frame.area(), "▣ Boilerplates", self)
             }
             AppState::Marketplace => {
-                components::render_wip_dialog(frame, frame.area(), "🛒 Marketplace", self)
+                components::render_wip_dialog(frame, frame.area(), "◐ Marketplace", self)
             }
             AppState::CodeSnippets => code_snippets::render(frame, self),
             AppState::InfoPage => {
-                components::render_wip_dialog(frame, frame.area(), "ℹ️ About", self)
+                components::render_wip_dialog(frame, frame.area(), "ⓘ About", self)
             }
             AppState::Settings => {
-                components::render_wip_dialog(frame, frame.area(), "⚙️ Settings", self)
+                components::render_wip_dialog(frame, frame.area(), "⚙ Settings", self)
             }
         }
     }

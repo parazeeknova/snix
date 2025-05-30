@@ -214,14 +214,22 @@ fn render_description(frame: &mut Frame, area: Rect, app: &App) {
 
 /// Renders recent snippets section below the main content
 fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
+    // Use the same width as the menu for visual consistency
+    let snippets_area = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(45), // Match menu width
+        Constraint::Fill(1),
+    ])
+    .split(area)[1];
+
     let block = Block::bordered()
-        .title(" 🕒 Recent Snippets ")
+        .title(" ⏱ Recent Snippets ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
-    let inner_area = block.inner(area);
-    block.render(area, frame.buffer_mut());
+    let inner_area = block.inner(snippets_area);
+    block.render(snippets_area, frame.buffer_mut());
 
     // Get most recently accessed snippets
     let mut recent_snippets: Vec<_> = app.snippet_database.snippets.values().collect();
@@ -248,13 +256,23 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
                 .unwrap_or("Unknown");
 
             let ago = format_time_ago(&snippet.accessed_at);
-            let content = format!("{} {} • {} • {}", icon, snippet.title, notebook_name, ago);
+
+            // Format the title to truncate if necessary
+            let title = if snippet.title.len() > 20 {
+                format!("{}...", &snippet.title[..17])
+            } else {
+                snippet.title.clone()
+            };
+
+            let content = format!("{} {} • {} • {}", icon, title, notebook_name, ago);
 
             ListItem::new(content).style(Style::default().fg(RosePine::TEXT))
         })
         .collect();
 
-    let list = List::new(items).style(Style::default().fg(RosePine::TEXT));
+    let list = List::new(items)
+        .style(Style::default().fg(RosePine::TEXT))
+        .highlight_style(Style::default().fg(RosePine::GOLD));
 
     list.render(inner_area, frame.buffer_mut());
 }

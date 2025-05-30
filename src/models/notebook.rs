@@ -30,7 +30,7 @@ impl Notebook {
             updated_at: now,
             tags: Vec::new(),
             color: String::from("#f38ba8"), // Rose Pine love color
-            icon: String::from("📁"),
+            icon: String::from("○"),        // Unicode circle symbol instead of emoji
             parent_id: None,
             children: Vec::new(),
             snippet_count: 0,
@@ -41,7 +41,7 @@ impl Notebook {
     pub fn new_with_parent(name: String, parent_id: Uuid) -> Self {
         let mut notebook = Self::new(name);
         notebook.parent_id = Some(parent_id);
-        notebook.icon = String::from("📂");
+        notebook.icon = String::from("◉"); // Filled circle symbol instead of emoji
         notebook
     }
 
@@ -62,32 +62,36 @@ impl Notebook {
         self.updated_at = Utc::now();
     }
 
-    pub fn is_root(&self) -> bool {
+    pub fn _is_root(&self) -> bool {
         self.parent_id.is_none()
     }
 
-    pub fn has_children(&self) -> bool {
+    pub fn _has_children(&self) -> bool {
         !self.children.is_empty()
     }
 
-    pub fn add_tag(&mut self, tag: String) {
+    /// Add a tag to the notebook
+    pub fn _add_tag(&mut self, tag: String) {
         if !self.tags.contains(&tag) {
             self.tags.push(tag);
             self.updated_at = Utc::now();
         }
     }
 
-    pub fn remove_tag(&mut self, tag: &str) {
+    /// Remove a tag from the notebook
+    pub fn _remove_tag(&mut self, tag: &str) {
         self.tags.retain(|t| t != tag);
         self.updated_at = Utc::now();
     }
 
-    pub fn set_metadata(&mut self, key: String, value: String) {
+    /// Set a metadata value
+    pub fn _set_metadata(&mut self, key: String, value: String) {
         self.metadata.insert(key, value);
         self.updated_at = Utc::now();
     }
 
-    pub fn get_metadata(&self, key: &str) -> Option<&String> {
+    /// Get a metadata value
+    pub fn _get_metadata(&self, key: &str) -> Option<&String> {
         self.metadata.get(key)
     }
 }

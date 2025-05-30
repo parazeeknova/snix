@@ -97,12 +97,74 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 }
                 InputMode::CreateSnippet => {
                     if !input.is_empty() {
-                        app.pending_snippet_title = input;
-                        app.input_mode = InputMode::SelectLanguage;
-                        app.selected_language = 0;
-                        app.clear_messages();
+                        // Check if user provided a file extension
+                        let (title, language) = if input.contains('.') {
+                            let parts: Vec<&str> = input.rsplitn(2, '.').collect();
+                            let extension = parts[0].to_lowercase();
+                            let title = parts[1].to_string();
+
+                            // Get language from extension
+                            let language = match extension.as_str() {
+                                "rs" => SnippetLanguage::Rust,
+                                "js" => SnippetLanguage::JavaScript,
+                                "ts" => SnippetLanguage::TypeScript,
+                                "py" => SnippetLanguage::Python,
+                                "go" => SnippetLanguage::Go,
+                                "java" => SnippetLanguage::Java,
+                                "c" => SnippetLanguage::C,
+                                "cpp" | "cc" | "cxx" => SnippetLanguage::Cpp,
+                                "cs" => SnippetLanguage::CSharp,
+                                "php" => SnippetLanguage::PHP,
+                                "rb" => SnippetLanguage::Ruby,
+                                "swift" => SnippetLanguage::Swift,
+                                "kt" => SnippetLanguage::Kotlin,
+                                "dart" => SnippetLanguage::Dart,
+                                "html" => SnippetLanguage::HTML,
+                                "css" => SnippetLanguage::CSS,
+                                "scss" => SnippetLanguage::SCSS,
+                                "sql" => SnippetLanguage::SQL,
+                                "sh" | "bash" => SnippetLanguage::Bash,
+                                "ps1" => SnippetLanguage::PowerShell,
+                                "yml" | "yaml" => SnippetLanguage::Yaml,
+                                "json" => SnippetLanguage::Json,
+                                "xml" => SnippetLanguage::Xml,
+                                "md" => SnippetLanguage::Markdown,
+                                "dockerfile" => SnippetLanguage::Dockerfile,
+                                "toml" => SnippetLanguage::Toml,
+                                "ini" => SnippetLanguage::Ini,
+                                "conf" | "config" => SnippetLanguage::Config,
+                                _ => SnippetLanguage::Text,
+                            };
+
+                            (title, language)
+                        } else {
+                            // No extension provided, use plain text
+                            (input, SnippetLanguage::Text)
+                        };
+
+                        // Get notebook_id for the snippet
+                        if let Some(notebook_id) = get_current_notebook_id(app) {
+                            match app.create_snippet(title, language, notebook_id) {
+                                Ok(_snippet_id) => {
+                                    app.set_success_message(
+                                        "Snippet created successfully!".to_string(),
+                                    );
+                                    // Set the code snippets state back to NotebookList to show the new snippet
+                                    app.code_snippets_state = CodeSnippetsState::NotebookList;
+                                    app.refresh_tree_items();
+                                }
+                                Err(e) => {
+                                    app.set_error_message(e);
+                                }
+                            }
+                        } else {
+                            app.set_error_message("No notebook selected".to_string());
+                        }
+
+                        app.input_mode = InputMode::Normal;
                     } else {
                         app.input_mode = InputMode::Normal;
+                        app.code_snippets_state = CodeSnippetsState::NotebookList;
                         app.clear_messages();
                     }
                 }
@@ -111,6 +173,9 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     app.input_mode = InputMode::Normal;
                     app.pending_snippet_title.clear();
                     app.clear_messages();
+
+                    // Ensure we go back to notebook list view
+                    app.code_snippets_state = CodeSnippetsState::NotebookList;
                 }
                 InputMode::Search => {
                     // TODO: Implement search
@@ -196,7 +261,7 @@ fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
         CodeSnippetsState::NotebookView { notebook_id } => {
             handle_notebook_view_keys(key, app, notebook_id)
         }
-        CodeSnippetsState::SnippetEditor { snippet_id } => {
+        CodeSnippetsState::_SnippetEditor { snippet_id } => {
             handle_snippet_editor_keys(key, app, snippet_id)
         }
         CodeSnippetsState::SearchSnippets => handle_search_keys(key, app),
@@ -206,11 +271,17 @@ fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
 
 /// Handles keys for the main notebook list view
 fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
+    // Dismiss any messages with Enter key
+    if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
+    {
+        app.clear_messages();
+        return false;
+    }
+
     // Clear messages on most interactions (except when in special modes)
     if app.input_mode == InputMode::Normal {
         match key.code {
             KeyCode::Esc
-            | KeyCode::Enter
             | KeyCode::Up
             | KeyCode::Down
             | KeyCode::Char('j')
@@ -223,44 +294,8 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         }
     }
 
-    // Handle language selection first
-    if app.input_mode == InputMode::SelectLanguage {
-        match key.code {
-            KeyCode::Enter => {
-                let languages = get_available_languages();
-                if let Some(selected_language) = languages.get(app.selected_language) {
-                    if let Some(notebook_id) = get_current_notebook_id(app) {
-                        match app.create_snippet(
-                            app.pending_snippet_title.clone(),
-                            selected_language.clone(),
-                            notebook_id,
-                        ) {
-                            Ok(_) => {
-                                app.set_success_message(
-                                    "Snippet created successfully!".to_string(),
-                                );
-                            }
-                            Err(e) => {
-                                app.set_error_message(e);
-                            }
-                        }
-                    } else {
-                        app.set_error_message("Please select a notebook first".to_string());
-                    }
-                }
-                app.input_mode = InputMode::Normal;
-                app.pending_snippet_title.clear();
-                return false;
-            }
-            KeyCode::Esc => {
-                app.input_mode = InputMode::Normal;
-                app.pending_snippet_title.clear();
-                app.clear_messages();
-                return false;
-            }
-            _ => return false,
-        }
-    }
+    // We've skipped language selection, so we don't need this code anymore
+    // This comment is kept as a reminder that language selection has been removed
 
     match key.code {
         // Navigation in tree view
@@ -275,6 +310,12 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 
         // Enter selected item (notebook or snippet)
         KeyCode::Enter => {
+            // If there's a message showing, Enter should just dismiss it
+            if app.error_message.is_some() || app.success_message.is_some() {
+                app.clear_messages();
+                return false;
+            }
+
             if let Some(selected_item) = app.get_selected_item().cloned() {
                 match selected_item {
                     TreeItem::Notebook(notebook_id) => {
@@ -292,9 +333,6 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 
                         // Launch external editor
                         launch_external_editor(app, snippet_id);
-
-                        // Return to main view after editing
-                        app.code_snippets_state = CodeSnippetsState::NotebookList;
                     }
                 }
             }
@@ -317,6 +355,13 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             } else {
                 app.input_mode = InputMode::CreateSnippet;
                 app.input_buffer.clear();
+
+                // Set notebook_id for snippet creation
+                let notebook_id = get_current_notebook_id(app)
+                    .unwrap_or_else(|| app.snippet_database.root_notebooks[0]);
+
+                // Set the code_snippets_state to CreateSnippet with the proper notebook_id
+                app.code_snippets_state = CodeSnippetsState::CreateSnippet { notebook_id };
             }
             false
         }
@@ -499,8 +544,10 @@ fn get_current_notebook_id(app: &App) -> Option<uuid::Uuid> {
 }
 
 /// Launch external editor for snippet editing
-/// Launch external editor for snippet editing
 fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
+    // Set flag to indicate a full UI redraw will be needed after editor use
+    app.needs_redraw = true;
+
     if let Some(snippet) = app.snippet_database.snippets.get(&snippet_id) {
         if let Some(ref storage) = app.storage_manager {
             let file_path = storage.get_snippet_file_path(snippet);
@@ -534,6 +581,10 @@ fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
                             app.set_error_message(format!("Failed to save database: {}", e));
                         } else {
                             app.set_success_message("Snippet saved successfully!".to_string());
+
+                            // Ensure we're back in the snippets list view
+                            app.code_snippets_state = CodeSnippetsState::NotebookList;
+                            app.refresh_tree_items();
                         }
                     }
                 }
@@ -549,13 +600,18 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
         terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
     use std::io::{Write, stdout};
+    use std::process::Command;
 
-    // Leave alternate screen and disable raw mode
-    execute!(stdout(), LeaveAlternateScreen)?;
+    // First completely exit the terminal UI
     disable_raw_mode()?;
+    execute!(stdout(), LeaveAlternateScreen)?;
 
-    // Clear the screen completely
-    print!("\x1B[2J\x1B[3J\x1B[H"); // Clear screen, scrollback, and move cursor to home
+    // Clear the terminal completely using the most thorough approach
+    print!("\x1B[!p"); // Soft reset (DEC)
+    print!("\x1B[3J"); // Clear scrollback buffer
+    print!("\x1B[2J"); // Clear entire screen
+    print!("\x1B[H"); // Move cursor to home position
+    print!("\x1B[?25h"); // Show cursor
     stdout().flush()?;
 
     // Try to launch editors in order of preference
@@ -563,7 +619,7 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
     let mut editor_launched = false;
 
     for editor in &editors {
-        if let Ok(mut child) = std::process::Command::new(editor).arg(file_path).spawn() {
+        if let Ok(mut child) = Command::new(editor).arg(file_path).spawn() {
             // Wait for editor to close
             if let Ok(_) = child.wait() {
                 editor_launched = true;
@@ -573,21 +629,35 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
     }
 
     if !editor_launched {
-        // Restore terminal state even if editor failed
-        enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen)?;
-        // Force clear everything again
-        print!("\x1B[2J\x1B[3J\x1B[H");
-        stdout().flush()?;
-        return Err("Could not launch any editor (nvim, vim, nano)".into());
+        println!("Could not launch any editor (nvim, vim, nano)");
+        println!("Press Enter to continue...");
+        let mut buffer = String::new();
+        std::io::stdin().read_line(&mut buffer)?;
+        return Err("Could not launch any editor".into());
     }
 
-    // Restore terminal state
+    // Give a visual signal that we're returning to the application
+    println!("\nReturning to snix...");
+    stdout().flush()?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Execute a full reset sequence for the terminal
+    print!("\x1Bc"); // Full terminal reset
+    print!("\x1B[!p"); // Soft reset (DEC)
+    print!("\x1B[3J"); // Clear scrollback buffer
+    print!("\x1B[2J"); // Clear entire screen
+    print!("\x1B[H"); // Move cursor to home position
+    stdout().flush()?;
+
+    // Restore the terminal UI state
     enable_raw_mode()?;
     execute!(stdout(), EnterAlternateScreen)?;
 
-    // Force clear everything to ensure clean state
-    print!("\x1B[2J\x1B[3J\x1B[H");
+    // Final screen initialization
+    print!("\x1B[?1049h"); // Ensure alternate screen buffer is active
+    print!("\x1B[?25l"); // Hide cursor
+    print!("\x1B[2J"); // Clear screen
+    print!("\x1B[H"); // Move cursor to home
     stdout().flush()?;
 
     Ok(())
@@ -625,6 +695,9 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
 /// - Single letter shortcuts for direct navigation to specific pages
 /// - All shortcuts work with both lowercase and uppercase letters
 fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
+    // Clear any previous messages
+    app.clear_messages();
+
     match key.code {
         // Menu navigation - move selection up (vi-style 'k' and arrow key)
         KeyCode::Up | KeyCode::Char('k') => {
@@ -741,10 +814,20 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
 /// - `h/H`: Emergency home navigation that clears all history and returns to start page
 /// - All other keys are ignored on these pages
 fn handle_other_page_keys(key: KeyEvent, app: &mut App) -> bool {
+    // Dismiss any messages with Enter key
+    if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
+    {
+        app.clear_messages();
+        return false;
+    }
+
     match key.code {
         // Standard back navigation - uses the navigation history stack
         KeyCode::Esc => {
-            if app.can_go_back() {
+            // Clear messages if any
+            if app.error_message.is_some() || app.success_message.is_some() {
+                app.clear_messages();
+            } else if app.can_go_back() {
                 app.go_back();
             }
             false

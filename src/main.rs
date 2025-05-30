@@ -10,64 +10,117 @@
 //! - Store and organize frequently used code snippets
 //! - Configure development workflow preferences
 
-use color_eyre::eyre::Result;
+use crate::app::App;
+use color_eyre::Result;
 use ratatui::{
-    DefaultTerminal,
+    Terminal,
+    backend::CrosstermBackend,
     crossterm::{
         event::{self, Event},
+        event::{DisableMouseCapture, EnableMouseCapture},
         execute,
-        terminal::{LeaveAlternateScreen, disable_raw_mode},
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     },
 };
+use std::error::Error;
+use std::io::{self};
+use std::time::Duration;
 
 mod app;
 mod handlers;
 mod models;
 mod ui;
 
-use app::App;
-use handlers::keys::handle_key_events;
-use std::io::stdout;
-
 /// Application entry point and initialization
 ///
-/// This function serves as the main entry point for the RustUI application. It handles
-/// the complete application lifecycle from startup to shutdown.
+/// This function initializes the terminal, sets up event handling, and
+/// runs the main application loop. It ensures proper terminal cleanup
+/// even if the application panics.
 ///
 /// The function uses color-eyre for enhanced error reporting, which provides beautiful
 /// stack traces and helpful debugging information in case of panics or errors.
-fn main() -> Result<()> {
-    println!("🔨 Starting snix - Template & Boilerplate Manager!");
+fn main() -> Result<(), Box<dyn Error>> {
+    println!("Starting snix - Template & Boilerplate Manager");
     println!("Created by parazeeknova");
 
     color_eyre::install()?;
-    let terminal = ratatui::init();
-    let result = run(terminal);
-    ratatui::restore();
 
-    disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
-    print!("\x1B[2J\x1B[3J\x1B[H"); // Final cleanup
+    // Initialize terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
-    result
-}
+    // Create terminal backend
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-/// Main application event loop and terminal management
-///
-/// This function contains the core application logic that drives the entire user interface.
-/// It manages the application state, handles the continuous render-update cycle, and
-/// processes user input events in a responsive manner.
-fn run(mut terminal: DefaultTerminal) -> Result<()> {
+    // Create app state
     let mut app = App::new();
-    // Main event loop - continues until user requests exit
-    loop {
-        terminal.draw(|frame| app.render(frame))?;
+    let mut should_quit = false;
 
-        if let Event::Key(key) = event::read()? {
-            if handle_key_events(key, &mut app) {
-                break;
+    // Main event loop
+    while !should_quit {
+        // Check if we need a full redraw
+        if app.needs_redraw {
+            force_redraw(&mut terminal, &app)?;
+            app.needs_redraw = false;
+        } else {
+            // Normal render
+            terminal.draw(|frame| app.render(frame))?;
+        }
+
+        // Wait for events with a timeout (longer timeout reduces CPU usage)
+        if event::poll(Duration::from_millis(250))? {
+            if let Event::Key(key) = event::read()? {
+                should_quit = handlers::keys::handle_key_events(key, &mut app);
+
+                // Check if we need to fully redraw the UI (like after using editor)
+                if app.needs_redraw {
+                    force_redraw(&mut terminal, &app)?;
+                    app.needs_redraw = false;
+                }
             }
         }
+
+        // Handle app ticks (background tasks, auto-clearing messages, etc.)
+        app._tick();
     }
+
+    // Cleanup and restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    println!("Thanks for using RustUI! Goodbye!");
+
+    Ok(())
+}
+
+/// Forces a complete redraw of the terminal UI
+/// Used after suspending for editor to ensure a clean UI state
+fn force_redraw<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    app: &App,
+) -> Result<(), Box<dyn Error>> {
+    // Clear the terminal completely
+    terminal.clear()?;
+
+    // Do a full reset of the terminal
+    use ratatui::crossterm::{
+        execute,
+        terminal::{Clear, ClearType},
+    };
+    use std::io::stdout;
+
+    execute!(stdout(), Clear(ClearType::All))?;
+
+    // Force two redraws to ensure clean state
+    terminal.draw(|frame| app.render(frame))?;
+    terminal.draw(|frame| app.render(frame))?;
+
     Ok(())
 }

@@ -23,10 +23,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         CodeSnippetsState::NotebookView { notebook_id } => {
             render_notebook_view(frame, main_area, app, notebook_id)
         }
-        CodeSnippetsState::SnippetEditor { snippet_id } => {
+        CodeSnippetsState::_SnippetEditor { snippet_id } => {
             render_snippet_editor(frame, main_area, app, snippet_id)
         }
-        CodeSnippetsState::CreateNotebook => render_create_notebook_dialog(frame, main_area, app),
+        CodeSnippetsState::_CreateNotebook => render_create_notebook_dialog(frame, main_area, app),
         CodeSnippetsState::CreateSnippet { notebook_id } => {
             render_create_snippet_dialog(frame, main_area, app, notebook_id)
         }
@@ -37,7 +37,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
 fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" 📝 Code Snippets Manager ")
+        .title(" ✎ Code Snippets Manager ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
@@ -57,7 +57,7 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
     let welcome_text = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "🌟 Welcome to Code Snippets Manager!",
+            "★ Welcome to Code Snippets Manager!",
             Style::default().fg(RosePine::LOVE).bold(),
         )),
         Line::from(""),
@@ -71,7 +71,7 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
         Line::from("• Use vim/nvim to edit your snippets with full LSP support"),
         Line::from(""),
         Line::from(Span::styled(
-            "💡 Tips:",
+            "☀ Tips:",
             Style::default().fg(RosePine::GOLD).bold(),
         )),
         Line::from("• Use descriptive names for your notebooks"),
@@ -95,7 +95,7 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_main_view(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" 📝 Code Snippets Manager ")
+        .title(" ✎ Code Snippets Manager ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
@@ -127,8 +127,8 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &App) {
         InputMode::CreateNotebook
         | InputMode::CreateSnippet
         | InputMode::Search
-        | InputMode::RenameNotebook
-        | InputMode::RenameSnippet => {
+        | InputMode::_RenameNotebook
+        | InputMode::_RenameSnippet => {
             render_input_overlay(frame, area, app);
         }
         InputMode::SelectLanguage => {
@@ -225,9 +225,9 @@ fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error
     Clear.render(popup_area, frame.buffer_mut());
 
     let (title, color) = if is_error {
-        ("❌ Error", RosePine::LOVE)
+        ("✗ Error", RosePine::LOVE)
     } else {
-        ("✅ Success", RosePine::FOAM)
+        ("✓ Success", RosePine::FOAM)
     };
 
     let block = Block::bordered()
@@ -242,7 +242,8 @@ fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error
     let chunks = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(1),
-        Constraint::Fill(1),
+        Constraint::Length(1),
+        Constraint::Length(3),
     ])
     .split(inner_area);
 
@@ -251,6 +252,19 @@ fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(RosePine::TEXT));
     message_paragraph.render(chunks[1], frame.buffer_mut());
+
+    // Add OK button
+    let ok_button = Paragraph::new("[ OK ]")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(color).bold());
+    ok_button.render(chunks[3], frame.buffer_mut());
+
+    // Add instructions
+    let instructions = "Press Enter or Esc to dismiss";
+    let instructions_paragraph = Paragraph::new(instructions)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(RosePine::MUTED));
+    instructions_paragraph.render(chunks[2], frame.buffer_mut());
 }
 
 /// Get list of available languages for snippet creation
@@ -290,7 +304,7 @@ fn get_available_languages() -> Vec<crate::models::SnippetLanguage> {
 
 fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" 📁 Notebooks & Snippets ")
+        .title(" ◉ Notebooks & Snippets ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
@@ -313,18 +327,9 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
             let (_icon, name, style) = match item {
                 TreeItem::Notebook(id) => {
                     if let Some(notebook) = app.snippet_database.notebooks.get(id) {
-                        let icon = if notebook.has_children() {
-                            "📂"
-                        } else {
-                            "📁"
-                        };
-                        let snippet_count = app
-                            .snippet_database
-                            .snippets
-                            .values()
-                            .filter(|s| s.notebook_id == *id)
-                            .count();
-                        let name = format!("{} {} ({})", icon, notebook.name, snippet_count);
+                        let icon = notebook.icon.as_str();
+                        let name =
+                            format!("{} {} ({})", icon, notebook.name, notebook.snippet_count);
                         let style = if i == app.selected_tree_item {
                             Style::default().fg(RosePine::LOVE).bold()
                         } else {
@@ -332,8 +337,9 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
                         };
                         (icon, name, style)
                     } else {
+                        let icon = "✗";
                         (
-                            "❌",
+                            icon,
                             "Unknown Notebook".to_string(),
                             Style::default().fg(RosePine::LOVE),
                         )
@@ -342,12 +348,7 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
                 TreeItem::Snippet(id) => {
                     if let Some(snippet) = app.snippet_database.snippets.get(id) {
                         let icon = snippet.language.icon();
-                        let name = format!(
-                            "  {} {} {}",
-                            icon,
-                            snippet.title,
-                            snippet.language.display_name()
-                        );
+                        let name = format!("   {} {}", icon, snippet.title,);
                         let style = if i == app.selected_tree_item {
                             Style::default().fg(RosePine::GOLD).bold()
                         } else {
@@ -355,9 +356,10 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
                         };
                         (icon, name, style)
                     } else {
+                        let icon = "✗";
                         (
-                            "❌",
-                            "  Unknown Snippet".to_string(),
+                            icon,
+                            "   Unknown Snippet".to_string(),
                             Style::default().fg(RosePine::LOVE),
                         )
                     }
@@ -385,7 +387,7 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_preview_panel(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title(" 👁️ Preview ")
+        .title(" ◎ Preview ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
@@ -424,7 +426,7 @@ fn render_notebook_preview(
     // Notebook info
     let info_lines = vec![
         Line::from(vec![
-            Span::styled("📁 ", Style::default().fg(RosePine::GOLD)),
+            Span::styled("○ ", Style::default().fg(RosePine::GOLD)),
             Span::styled(&notebook.name, Style::default().fg(RosePine::TEXT).bold()),
         ]),
         Line::from(""),
@@ -557,40 +559,117 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
 
     info_paragraph.render(chunks[0], frame.buffer_mut());
 
-    // Show content preview with basic syntax highlighting by language
+    // Show content preview with bat syntax highlighting when possible
     if !snippet.content.is_empty() {
-        let preview_content = snippet.get_preview(20);
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        use std::str;
 
-        // TODO: Add proper syntax highlighting here using syntect
-        // For now, just show the content with language-specific styling
-        let content_style = match snippet.language {
-            crate::models::SnippetLanguage::Rust => Style::default().fg(RosePine::GOLD),
-            crate::models::SnippetLanguage::Python => Style::default().fg(RosePine::FOAM),
-            crate::models::SnippetLanguage::JavaScript => Style::default().fg(RosePine::ROSE),
-            crate::models::SnippetLanguage::TypeScript => Style::default().fg(RosePine::IRIS),
-            _ => Style::default().fg(RosePine::TEXT),
-        };
+        // Get the full content for preview
+        let preview_content = snippet.get_preview(0); // Parameter is ignored, gets full content
+        let title = format!(" Content Preview ({}) ", snippet.language.display_name());
 
-        let content_paragraph = Paragraph::new(preview_content)
-            .block(
-                Block::bordered()
-                    .title(format!(
-                        " Content Preview ({}) ",
-                        snippet.language.display_name()
-                    ))
-                    .border_type(BorderType::Rounded)
-                    .style(Style::default().fg(RosePine::HIGHLIGHT_LOW)),
-            )
-            .wrap(Wrap { trim: false })
-            .style(content_style);
+        let content_block = Block::bordered()
+            .title(title)
+            .border_type(BorderType::Rounded)
+            .style(Style::default().fg(RosePine::HIGHLIGHT_LOW));
 
-        content_paragraph.render(chunks[1], frame.buffer_mut());
+        let inner_content_area = content_block.inner(chunks[1]);
+        content_block.render(chunks[1], frame.buffer_mut());
+
+        // Try to use bat for syntax highlighting if available
+        let bat_available = Command::new("bat").arg("--version").output().is_ok();
+
+        if bat_available {
+            let language_arg = format!(
+                "--language={}",
+                snippet.language.display_name().to_lowercase()
+            );
+
+            // Use bat to generate highlighted output
+            let mut bat_process = match Command::new("bat")
+                .args(&[
+                    "--color=always",
+                    "--style=plain",
+                    "--theme=ansi",
+                    &language_arg,
+                    "--paging=never",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+            {
+                Ok(process) => process,
+                Err(_) => {
+                    // Fallback to regular display if bat fails to start
+                    display_regular_content(frame, inner_content_area, &preview_content, snippet);
+                    return;
+                }
+            };
+
+            // Write content to bat's stdin
+            if let Some(stdin) = bat_process.stdin.as_mut() {
+                if stdin.write_all(preview_content.as_bytes()).is_err() {
+                    display_regular_content(frame, inner_content_area, &preview_content, snippet);
+                    return;
+                }
+            }
+
+            // Read highlighted output
+            match bat_process.wait_with_output() {
+                Ok(output) if output.status.success() => {
+                    if let Ok(highlighted) = str::from_utf8(&output.stdout) {
+                        let content_paragraph = Paragraph::new(highlighted)
+                            .wrap(Wrap { trim: false })
+                            .scroll((0, 0)) // Start at the top
+                            .style(Style::default());
+
+                        content_paragraph.render(inner_content_area, frame.buffer_mut());
+                    } else {
+                        display_regular_content(
+                            frame,
+                            inner_content_area,
+                            &preview_content,
+                            snippet,
+                        );
+                    }
+                }
+                _ => {
+                    display_regular_content(frame, inner_content_area, &preview_content, snippet);
+                }
+            }
+        } else {
+            display_regular_content(frame, inner_content_area, &preview_content, snippet);
+        }
     } else {
         let empty_text = Paragraph::new("Empty snippet\nPress Enter to edit")
             .alignment(Alignment::Center)
             .style(Style::default().fg(RosePine::MUTED));
         empty_text.render(chunks[1], frame.buffer_mut());
     }
+}
+
+fn display_regular_content(
+    frame: &mut Frame,
+    area: Rect,
+    content: &str,
+    snippet: &crate::models::CodeSnippet,
+) {
+    // Fallback to basic syntax highlighting
+    let content_style = match snippet.language {
+        crate::models::SnippetLanguage::Rust => Style::default().fg(RosePine::GOLD),
+        crate::models::SnippetLanguage::Python => Style::default().fg(RosePine::FOAM),
+        crate::models::SnippetLanguage::JavaScript => Style::default().fg(RosePine::ROSE),
+        crate::models::SnippetLanguage::TypeScript => Style::default().fg(RosePine::IRIS),
+        _ => Style::default().fg(RosePine::TEXT),
+    };
+
+    let content_paragraph = Paragraph::new(content)
+        .wrap(Wrap { trim: false })
+        .scroll((0, 0)) // Start at the top
+        .style(content_style);
+
+    content_paragraph.render(area, frame.buffer_mut());
 }
 
 fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
@@ -603,8 +682,8 @@ fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
         InputMode::CreateNotebook => " Create New Notebook ",
         InputMode::CreateSnippet => " Create New Snippet ",
         InputMode::Search => " Search Snippets ",
-        InputMode::RenameNotebook => " Rename Notebook ",
-        InputMode::RenameSnippet => " Rename Snippet ",
+        InputMode::_RenameNotebook => " Rename Notebook ",
+        InputMode::_RenameSnippet => " Rename Snippet ",
         _ => " Input ",
     };
 
@@ -639,10 +718,12 @@ fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
     // Instructions
     let instructions = match app.input_mode {
         InputMode::CreateNotebook => "Enter notebook name and press Enter",
-        InputMode::CreateSnippet => "Enter snippet title and press Enter",
+        InputMode::CreateSnippet => {
+            "Enter snippet title with optional extension (e.g. 'example.py')"
+        }
         InputMode::Search => "Enter search terms and press Enter",
-        InputMode::RenameNotebook => "Enter new notebook name and press Enter",
-        InputMode::RenameSnippet => "Enter new snippet title and press Enter",
+        InputMode::_RenameNotebook => "Enter new notebook name and press Enter",
+        InputMode::_RenameSnippet => "Enter new snippet title and press Enter",
         _ => "Press Enter to confirm, Esc to cancel",
     };
 
@@ -676,16 +757,92 @@ fn render_snippet_editor(frame: &mut Frame, area: Rect, _app: &App, _snippet_id:
 }
 
 fn render_create_notebook_dialog(frame: &mut Frame, area: Rect, app: &App) {
-    render_input_overlay(frame, area, app);
+    // Use the input overlay with the correct mode
+    if app.input_mode == InputMode::CreateNotebook {
+        render_input_overlay(frame, area, app);
+    } else {
+        // If we're not in the correct input mode, show error message
+        let message = "Error: Not in notebook creation mode";
+        render_message_overlay(frame, area, message, true);
+    }
 }
 
-fn render_create_snippet_dialog(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-    _notebook_id: uuid::Uuid,
-) {
-    render_input_overlay(frame, area, app);
+fn render_create_snippet_dialog(frame: &mut Frame, area: Rect, app: &App, notebook_id: uuid::Uuid) {
+    match app.input_mode {
+        InputMode::CreateSnippet => {
+            // Check that we have a valid notebook
+            if app.snippet_database.notebooks.contains_key(&notebook_id) {
+                // Show notebook name in the dialog
+                let notebook_name = app
+                    .snippet_database
+                    .notebooks
+                    .get(&notebook_id)
+                    .map(|n| n.name.as_str())
+                    .unwrap_or("Unknown Notebook");
+
+                // Modified overlay with notebook info
+                let popup_area = centered_rect(60, 20, area);
+                Clear.render(popup_area, frame.buffer_mut());
+
+                let block = Block::bordered()
+                    .title(format!(" Create New Snippet in \"{}\" ", notebook_name))
+                    .title_alignment(Alignment::Center)
+                    .border_type(BorderType::Rounded)
+                    .style(Style::default().fg(RosePine::LOVE));
+
+                let inner_area = block.inner(popup_area);
+                block.render(popup_area, frame.buffer_mut());
+
+                let chunks = Layout::vertical([
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ])
+                .split(inner_area);
+
+                // Input field
+                let input_text = format!("> {}", app.input_buffer);
+                let input_paragraph = Paragraph::new(input_text)
+                    .style(Style::default().fg(RosePine::TEXT))
+                    .block(
+                        Block::bordered()
+                            .border_type(BorderType::Rounded)
+                            .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH)),
+                    );
+
+                input_paragraph.render(chunks[0], frame.buffer_mut());
+
+                // Instructions
+                let instructions =
+                    "Enter snippet title with optional extension (e.g. 'example.py')";
+                let instructions_paragraph = Paragraph::new(instructions)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(RosePine::MUTED));
+
+                instructions_paragraph.render(chunks[1], frame.buffer_mut());
+
+                let help_text = "Esc: Cancel • Enter: Confirm";
+                let help_paragraph = Paragraph::new(help_text)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(RosePine::SUBTLE));
+
+                help_paragraph.render(chunks[2], frame.buffer_mut());
+            } else {
+                // If notebook doesn't exist, show error
+                let message = "Error: Selected notebook not found";
+                render_message_overlay(frame, area, message, true);
+            }
+        }
+        InputMode::SelectLanguage => {
+            // Show language selection dialog for the snippet
+            render_language_selection_overlay(frame, area, app);
+        }
+        _ => {
+            // If we're not in the correct input mode, show error message
+            let message = "Error: Not in snippet creation mode";
+            render_message_overlay(frame, area, message, true);
+        }
+    }
 }
 
 fn render_search_view(frame: &mut Frame, area: Rect, _app: &App) {

@@ -23,11 +23,13 @@ impl Default for SnippetDatabase {
     }
 }
 
+/// Storage Manager for disk operations
 #[derive(Debug)]
 pub struct StorageManager {
-    data_dir: PathBuf,
-    db_file: PathBuf,
+    _data_dir: PathBuf, // Prefix with underscore to mark as intentionally unused
     snippets_dir: PathBuf,
+    _notebooks_dir: PathBuf, // Prefix with underscore to mark as intentionally unused
+    database_file: PathBuf,
 }
 
 impl StorageManager {
@@ -44,18 +46,20 @@ impl StorageManager {
         fs::create_dir_all(&snippets_dir)?;
 
         Ok(Self {
-            data_dir,
-            db_file,
+            _data_dir: data_dir.clone(),
             snippets_dir,
+            _notebooks_dir: data_dir,
+            database_file: db_file,
         })
     }
 
     pub fn load_database(&self) -> Result<SnippetDatabase> {
-        if !self.db_file.exists() {
+        if !self.database_file.exists() {
             return Ok(SnippetDatabase::default());
         }
 
-        let content = fs::read_to_string(&self.db_file).context("Failed to read database file")?;
+        let content =
+            fs::read_to_string(&self.database_file).context("Failed to read database file")?;
 
         serde_json::from_str(&content).context("Failed to parse database JSON")
     }
@@ -63,7 +67,7 @@ impl StorageManager {
     pub fn save_database(&self, db: &SnippetDatabase) -> Result<()> {
         let content = serde_json::to_string_pretty(db).context("Failed to serialize database")?;
 
-        fs::write(&self.db_file, content).context("Failed to write database file")
+        fs::write(&self.database_file, content).context("Failed to write database file")
     }
 
     pub fn save_snippet_content(&self, snippet: &CodeSnippet) -> Result<()> {
@@ -126,12 +130,13 @@ impl StorageManager {
             .join(filename)
     }
 
-    pub fn export_notebook(
+    /// Export a notebook to a file
+    pub fn _export_notebook(
         &self,
         notebook_id: Uuid,
-        export_path: &Path,
         db: &SnippetDatabase,
-    ) -> Result<()> {
+        export_path: &Path,
+    ) -> Result<PathBuf> {
         let notebook = db
             .notebooks
             .get(&notebook_id)
@@ -162,10 +167,11 @@ impl StorageManager {
             }
         }
 
-        Ok(())
+        Ok(export_dir)
     }
 
-    pub fn import_notebook(&self, import_path: &Path, db: &mut SnippetDatabase) -> Result<Uuid> {
+    /// Import a notebook from a file
+    pub fn _import_notebook(&self, import_path: &Path, db: &mut SnippetDatabase) -> Result<Uuid> {
         let metadata_file = import_path.join("notebook.json");
 
         if !metadata_file.exists() {
@@ -188,10 +194,17 @@ impl StorageManager {
             let path = entry.path();
 
             if path.is_file() && path.file_name() != Some(std::ffi::OsStr::new("notebook.json")) {
+                // Try to extract filename and extension
                 if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                    if let Some((title, extension)) = filename.rsplit_once('.') {
+                    if let Some((title, _extension)) = filename.rsplit_once('.') {
                         let content = fs::read_to_string(&path)?;
-                        let language = crate::models::SnippetLanguage::from_extension(extension);
+                        let extension = if let Some(ext) = Path::new(&filename).extension() {
+                            ext.to_string_lossy().to_string()
+                        } else {
+                            "txt".to_string()
+                        };
+
+                        let language = crate::models::SnippetLanguage::_from_extension(&extension);
 
                         let mut snippet = CodeSnippet::new(
                             title.replace('_', " ").to_string(),
@@ -213,23 +226,26 @@ impl StorageManager {
         Ok(new_notebook_id)
     }
 
-    pub fn backup_database(&self) -> Result<PathBuf> {
-        let backup_dir = self.data_dir.join("backups");
+    /// Backup the database to a timestamped file
+    pub fn _backup_database(&self) -> Result<PathBuf> {
+        let backup_dir = self._data_dir.join("backups");
         fs::create_dir_all(&backup_dir)?;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         let backup_file = backup_dir.join(format!("backup_{}.json", timestamp));
 
-        fs::copy(&self.db_file, &backup_file)?;
+        fs::copy(&self.database_file, &backup_file)?;
 
         Ok(backup_file)
     }
 
-    pub fn get_data_directory(&self) -> &Path {
-        &self.data_dir
+    /// Get the data directory path
+    pub fn _get_data_directory(&self) -> &Path {
+        &self._data_dir
     }
 
-    pub fn get_snippets_directory(&self) -> &Path {
+    /// Get the snippets directory path
+    pub fn _get_snippets_directory(&self) -> &Path {
         &self.snippets_dir
     }
 }
