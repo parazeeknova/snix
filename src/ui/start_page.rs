@@ -213,13 +213,13 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
     // Use the same width as the menu for visual consistency
     let snippets_area = Layout::horizontal([
         Constraint::Fill(1),
-        Constraint::Length(60),
+        Constraint::Length(80),
         Constraint::Fill(1),
     ])
     .split(area)[1];
 
     let block = Block::bordered()
-        .title(" ⏱ Recent Snippets [1-5 to open] ")
+        .title(" ⏱ Recent Snippets [1-10 to open] ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));

@@ -1049,18 +1049,27 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
-        // Numeric shortcuts for recent snippets (1-5)
         KeyCode::Char('1')
         | KeyCode::Char('2')
         | KeyCode::Char('3')
         | KeyCode::Char('4')
-        | KeyCode::Char('5') => {
+        | KeyCode::Char('5')
+        | KeyCode::Char('6')
+        | KeyCode::Char('7')
+        | KeyCode::Char('8')
+        | KeyCode::Char('9')
+        | KeyCode::Char('0') => {
             let index = match key.code {
                 KeyCode::Char('1') => 0,
                 KeyCode::Char('2') => 1,
                 KeyCode::Char('3') => 2,
                 KeyCode::Char('4') => 3,
                 KeyCode::Char('5') => 4,
+                KeyCode::Char('6') => 5,
+                KeyCode::Char('7') => 6,
+                KeyCode::Char('8') => 7,
+                KeyCode::Char('9') => 8,
+                KeyCode::Char('0') => 9,
                 _ => unreachable!(),
             };
 
