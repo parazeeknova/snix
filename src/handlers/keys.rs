@@ -6,6 +6,7 @@
 
 use crate::app::{App, AppState, CodeSnippetsState, InputMode, TreeItem};
 use crate::models::SnippetLanguage;
+use crate::ui::colors::RosePine;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -15,7 +16,51 @@ use std::process::{Command, Stdio};
 /// key events from the terminal and routes them to appropriate specialized handlers
 /// based on the current application state.
 pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
-    // Handle input mode first for code snippets
+    // Handle special input modes first
+    if app.input_mode == InputMode::SelectNotebookColor {
+        match key.code {
+            KeyCode::Esc => {
+                app.input_mode = InputMode::Normal;
+                app.clear_messages();
+                return false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let colors = get_available_colors();
+                app.selected_language = if app.selected_language == 0 {
+                    colors.len() - 1
+                } else {
+                    app.selected_language - 1
+                };
+                return false;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let colors = get_available_colors();
+                app.selected_language = (app.selected_language + 1) % colors.len();
+                return false;
+            }
+            KeyCode::Enter => {
+                if let Some(notebook_id) = app.current_notebook_id {
+                    match app.update_notebook_color(notebook_id, app.selected_language) {
+                        Ok(_) => {
+                            app.set_success_message(
+                                "Notebook color updated successfully".to_string(),
+                            );
+                        }
+                        Err(e) => {
+                            app.set_error_message(e);
+                        }
+                    }
+                } else {
+                    app.set_error_message("No notebook selected".to_string());
+                }
+                app.input_mode = InputMode::Normal;
+                return false;
+            }
+            _ => {}
+        }
+    }
+
+    // Handle other input modes
     if app.state == AppState::CodeSnippets && app.input_mode != InputMode::Normal {
         return handle_input_mode_keys(key, app);
     }
@@ -159,14 +204,12 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                             (input, SnippetLanguage::Text)
                         };
 
-                        // Get notebook_id for the snippet
                         if let Some(notebook_id) = get_current_notebook_id(app) {
                             match app.create_snippet(title, language, notebook_id) {
                                 Ok(_snippet_id) => {
                                     app.set_success_message(
                                         "Snippet created successfully!".to_string(),
                                     );
-                                    // Set the code snippets state back to NotebookList to show the new snippet
                                     app.code_snippets_state = CodeSnippetsState::NotebookList;
                                     app.refresh_tree_items();
                                 }
@@ -191,7 +234,6 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     app.pending_snippet_title.clear();
                     app.clear_messages();
 
-                    // Ensure we go back to notebook list view
                     app.code_snippets_state = CodeSnippetsState::NotebookList;
                 }
                 InputMode::Search => {
@@ -202,7 +244,6 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     app.clear_messages();
                 }
                 InputMode::EditSnippetDescription => {
-                    // Get the snippet ID from the selected item
                     if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
                         match app.update_snippet_description(*snippet_id, input) {
                             Ok(_) => {
@@ -219,6 +260,26 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     }
                     app.input_mode = InputMode::Normal;
                     app.pending_snippet_title.clear();
+                }
+                InputMode::EditNotebookDescription => {
+                    if let Some(notebook_id) = app.current_notebook_id {
+                        match app.update_notebook_description(notebook_id, input) {
+                            Ok(_) => {
+                                app.set_success_message(
+                                    "Notebook description updated successfully".to_string(),
+                                );
+                            }
+                            Err(e) => {
+                                app.set_error_message(e);
+                            }
+                        }
+                    } else {
+                        app.set_error_message("No notebook selected".to_string());
+                    }
+                    app.input_mode = InputMode::Normal;
+                }
+                InputMode::SelectNotebookColor => {
+                    app.input_mode = InputMode::Normal;
                 }
                 _ => {
                     app.input_mode = InputMode::Normal;
@@ -246,7 +307,9 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
         KeyCode::Char(c) => {
-            if app.input_mode != InputMode::SelectLanguage {
+            if app.input_mode != InputMode::SelectLanguage
+                && app.input_mode != InputMode::SelectNotebookColor
+            {
                 app.input_buffer.push(c);
             }
             false
@@ -294,7 +357,7 @@ fn get_available_languages() -> Vec<SnippetLanguage> {
 fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
     match app.code_snippets_state {
         CodeSnippetsState::NotebookList => handle_notebook_list_keys(key, app),
-        CodeSnippetsState::_NotebookView { notebook_id } => {
+        CodeSnippetsState::NotebookView { notebook_id } => {
             handle_notebook_view_keys(key, app, notebook_id)
         }
         CodeSnippetsState::NotebookDetails { notebook_id } => {
@@ -377,6 +440,16 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             if app.error_message.is_some() || app.success_message.is_some() {
                 app.clear_messages();
                 return false;
+            }
+
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                // Special handler for Shift+Enter
+                if let Some(TreeItem::Notebook(notebook_id, _)) = app.get_selected_item().cloned() {
+                    app.current_notebook_id = Some(notebook_id);
+                    // Use NotebookView when Shift+Enter is pressed, for classic view
+                    app.code_snippets_state = CodeSnippetsState::NotebookView { notebook_id };
+                    return false;
+                }
             }
 
             if let Some(selected_item) = app.get_selected_item().cloned() {
@@ -636,7 +709,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 }
 
 /// Handles keys for notebook view
-fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::Uuid) -> bool {
+fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, notebook_id: uuid::Uuid) -> bool {
     match key.code {
         KeyCode::Esc => {
             app.code_snippets_state = CodeSnippetsState::NotebookList;
@@ -648,7 +721,7 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::U
 }
 
 /// Handles keys for snippet editor
-fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, _snippet_id: uuid::Uuid) -> bool {
+fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, snippet_id: uuid::Uuid) -> bool {
     match key.code {
         KeyCode::Esc => {
             app.code_snippets_state = CodeSnippetsState::NotebookList;
@@ -956,7 +1029,6 @@ fn handle_other_page_keys(key: KeyEvent, app: &mut App) -> bool {
     }
 }
 
-/// Add a new handler for notebook details view
 fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid::Uuid) -> bool {
     match key.code {
         KeyCode::Esc => {
@@ -973,6 +1045,36 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
             false
         }
 
+        // Edit notebook description
+        KeyCode::Char('e') | KeyCode::Char('E') => {
+            app.clear_messages();
+            if let Some(notebook) = app.snippet_database.notebooks.get(&notebook_id) {
+                app.input_mode = InputMode::EditNotebookDescription;
+                let desc = notebook.description.clone().unwrap_or_default();
+                let desc_without_color = if desc.starts_with("[COLOR:") {
+                    if let Some(end_idx) = desc.find(']') {
+                        desc[end_idx + 1..].trim().to_string()
+                    } else {
+                        desc
+                    }
+                } else {
+                    desc
+                };
+                app.input_buffer = desc_without_color;
+            } else {
+                app.set_error_message("Notebook not found".to_string());
+            }
+            false
+        }
+
+        // Change notebook color
+        KeyCode::Char('c') | KeyCode::Char('C') => {
+            app.clear_messages();
+            app.input_mode = InputMode::SelectNotebookColor;
+            app.selected_language = app.get_notebook_color(&notebook_id);
+            false
+        }
+
         KeyCode::PageUp => {
             app.content_scroll_position = app.content_scroll_position.saturating_sub(5);
             app.needs_redraw = true;
@@ -986,4 +1088,18 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
 
         _ => false,
     }
+}
+
+#[allow(dead_code)]
+fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
+    vec![
+        ("Default", RosePine::TEXT),
+        ("Red", RosePine::LOVE),
+        ("Orange", RosePine::GOLD),
+        ("Green", RosePine::FOAM),
+        ("Blue", RosePine::IRIS),
+        ("Purple", RosePine::IRIS),
+        ("Pink", RosePine::ROSE),
+        ("White", ratatui::style::Color::White),
+    ]
 }

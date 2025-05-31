@@ -29,7 +29,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     match app.code_snippets_state {
         CodeSnippetsState::NotebookList => render_main_view(frame, main_area, app),
-        CodeSnippetsState::_NotebookView { notebook_id } => {
+        CodeSnippetsState::NotebookView { notebook_id } => {
             render_notebook_view(frame, main_area, app, notebook_id)
         }
         CodeSnippetsState::NotebookDetails { notebook_id } => {
@@ -121,7 +121,7 @@ fn render_main_view(frame: &mut Frame, area: Rect, app: &mut App) {
     render_preview_panel(frame, content_chunks[1], app);
 
     // Then render the tree view (foreground)
-    render_tree_view(frame, content_chunks[0], app);
+    render_tree_view_with_colors(frame, content_chunks[0], app);
 
     // Render the bottom bar
     render_bottom_bar(frame, main_chunks[1], app);
@@ -140,11 +140,15 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
         | InputMode::Search
         | InputMode::_RenameNotebook
         | InputMode::_RenameSnippet
-        | InputMode::EditSnippetDescription => {
+        | InputMode::EditSnippetDescription
+        | InputMode::EditNotebookDescription => {
             render_input_overlay(frame, area, app);
         }
         InputMode::SelectLanguage => {
             render_language_selection_overlay(frame, area, app);
+        }
+        InputMode::SelectNotebookColor => {
+            render_color_selection_overlay(frame, area, app);
         }
         InputMode::HelpMenu => {
             render_help_menu_overlay(frame, area, app);
@@ -224,7 +228,7 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled("  Shift+⏎ ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Open notebook details view"),
+            Span::raw("Open classic notebook view"),
         ]),
         Line::from(vec![
             Span::styled("  x   ", Style::default().fg(RosePine::GOLD)),
@@ -440,6 +444,105 @@ fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &mut Ap
 
     frame.render_stateful_widget(language_list, inner_list_area, &mut list_state);
 }
+
+fn render_color_selection_overlay(frame: &mut Frame, area: Rect, app: &mut App) {
+    let popup_area = spotlight_bar(70, area);
+    Clear.render(popup_area, frame.buffer_mut());
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE).bg(RosePine::SURFACE));
+
+    let inner_area = block.inner(popup_area);
+    block.render(popup_area, frame.buffer_mut());
+
+    let title = "Select Notebook Color";
+    let chunks = Layout::horizontal([
+        Constraint::Length(title.len() as u16 + 4),
+        Constraint::Min(10),
+        Constraint::Length(24),
+    ])
+    .split(inner_area);
+
+    let title_paragraph = Paragraph::new(title)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(RosePine::IRIS).bold());
+    title_paragraph.render(chunks[0], frame.buffer_mut());
+
+    let colors = get_available_colors();
+    let selected_color = &colors[app.selected_language % colors.len()];
+    let selected_text = format!("■ {}", selected_color.0);
+
+    let dropdown_paragraph = Paragraph::new(selected_text)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(selected_color.1));
+    dropdown_paragraph.render(chunks[1], frame.buffer_mut());
+
+    let help_text = "↑↓ Navigate • ⏎ Select";
+    let help_paragraph = Paragraph::new(help_text)
+        .alignment(Alignment::Right)
+        .style(Style::default().fg(RosePine::MUTED));
+    help_paragraph.render(chunks[2], frame.buffer_mut());
+
+    let list_area = Rect::new(
+        area.x + area.width / 4,
+        popup_area.y + popup_area.height + 1,
+        area.width / 2,
+        10,
+    );
+
+    Clear.render(list_area, frame.buffer_mut());
+
+    let list_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE));
+
+    let inner_list_area = list_block.inner(list_area);
+    list_block.render(list_area, frame.buffer_mut());
+
+    let color_items: Vec<ListItem> = colors
+        .iter()
+        .enumerate()
+        .map(|(i, (name, color))| {
+            let content = format!("■ {}", name);
+
+            let style = if i == app.selected_language % colors.len() {
+                Style::default().fg(*color).bold()
+            } else {
+                Style::default().fg(*color)
+            };
+
+            ListItem::new(content).style(style)
+        })
+        .collect();
+
+    let color_list = List::new(color_items)
+        .highlight_style(
+            Style::default()
+                .fg(RosePine::BASE)
+                .bg(RosePine::LOVE)
+                .bold(),
+        )
+        .highlight_symbol("▶ ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.selected_language % colors.len()));
+
+    frame.render_stateful_widget(color_list, inner_list_area, &mut list_state);
+}
+
+fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
+    vec![
+        ("Default", RosePine::TEXT),
+        ("Red", RosePine::LOVE),
+        ("Orange", RosePine::GOLD),
+        ("Green", RosePine::FOAM),
+        ("Blue", RosePine::IRIS),
+        ("Purple", RosePine::IRIS),
+        ("Pink", RosePine::ROSE),
+        ("White", ratatui::style::Color::White),
+    ]
+}
+
 fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error: bool) {
     let popup_area = spotlight_bar(70, area);
 
@@ -516,9 +619,29 @@ fn get_available_languages() -> Vec<crate::models::SnippetLanguage> {
     ]
 }
 
-fn render_tree_view(frame: &mut Frame, area: Rect, app: &mut App) {
+fn create_tree_indent(depth: usize, is_last_item: bool) -> String {
+    if depth == 0 {
+        return String::new();
+    }
+
+    let mut indent = String::new();
+
+    for _ in 0..depth - 1 {
+        indent.push_str("│ ");
+    }
+
+    if is_last_item {
+        indent.push_str("└──");
+    } else {
+        indent.push_str("├──");
+    }
+
+    indent
+}
+
+fn render_tree_view_with_colors(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered()
-        .title("  Notebooks & Snippets ")
+        .title("  Notebooks & Snippets ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
@@ -539,71 +662,102 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &mut App) {
         app.hovered_tree_item = Some(app.selected_tree_item);
     }
 
+    // Build a mapping of notebook IDs to colors for indentation
+    let mut notebook_colors = std::collections::HashMap::new();
+    for item in &app.tree_items {
+        if let TreeItem::Notebook(id, _) = item {
+            let color_index = app.get_notebook_color(id);
+            let colors = get_available_colors();
+            let notebook_color = colors
+                .get(color_index % colors.len())
+                .unwrap_or(&colors[0])
+                .1;
+            notebook_colors.insert(*id, notebook_color);
+        }
+    }
+
     let items: Vec<ListItem> = app
         .tree_items
         .iter()
         .enumerate()
-        .map(|(i, item)| {
-            let (name, style) = match item {
-                TreeItem::Notebook(id, depth) => {
-                    if let Some(notebook) = app.snippet_database.notebooks.get(id) {
-                        let indent = create_tree_indent(*depth, false);
-                        let icon = "";
-                        let name = format!(
-                            "{}{} {} ({})",
-                            indent, icon, notebook.name, notebook.snippet_count
-                        );
-                        let style = if i == app.selected_tree_item {
-                            Style::default().fg(RosePine::LOVE).bold()
-                        } else {
-                            Style::default().fg(RosePine::TEXT)
-                        };
-                        (name, style)
-                    } else {
-                        let indent = create_tree_indent(*depth, false);
-                        let icon = "✗";
-                        (
-                            format!("{}{} Unknown Notebook", indent, icon),
-                            Style::default().fg(RosePine::LOVE),
-                        )
-                    }
+        .map(|(i, item)| match item {
+            TreeItem::Notebook(id, depth) => {
+                if let Some(notebook) = app.snippet_database.notebooks.get(id) {
+                    let color_index = app.get_notebook_color(id);
+                    let colors = get_available_colors();
+                    let notebook_color = colors
+                        .get(color_index % colors.len())
+                        .unwrap_or(&colors[0])
+                        .1;
+
+                    let indent_str = create_tree_indent(*depth, false);
+                    let icon = "";
+
+                    let spans = vec![
+                        Span::styled(indent_str, Style::default().fg(notebook_color)),
+                        Span::styled(format!("{} ", icon), Style::default().fg(notebook_color)),
+                        Span::styled(
+                            format!("{} ({})", notebook.name, notebook.snippet_count),
+                            if i == app.selected_tree_item {
+                                Style::default().fg(RosePine::LOVE).bold()
+                            } else {
+                                Style::default().fg(notebook_color)
+                            },
+                        ),
+                    ];
+
+                    ListItem::new(Line::from(spans))
+                } else {
+                    let indent_str = create_tree_indent(*depth, false);
+                    let icon = "✗";
+                    ListItem::new(format!("{}{} Unknown Notebook", indent_str, icon))
+                        .style(Style::default().fg(RosePine::LOVE))
                 }
-                TreeItem::Snippet(id, depth) => {
-                    if let Some(snippet) = app.snippet_database.snippets.get(id) {
-                        let indent = create_tree_indent(*depth, true);
-                        let icon = snippet.language.icon();
+            }
+            TreeItem::Snippet(id, depth) => {
+                if let Some(snippet) = app.snippet_database.snippets.get(id) {
+                    let parent_color = notebook_colors
+                        .get(&snippet.notebook_id)
+                        .copied()
+                        .unwrap_or(RosePine::TEXT);
 
-                        let mut name = format!("{}{} {}", indent, icon, snippet.title);
+                    let indent_str = create_tree_indent(*depth, true);
+                    let icon = snippet.language.icon();
 
-                        if let Some(desc) = &snippet.description {
-                            if !desc.is_empty() {
-                                let short_desc = if desc.len() > 30 {
-                                    format!("{}...", &desc[0..27])
-                                } else {
-                                    desc.clone()
-                                };
-                                name = format!("{} - {}", name, short_desc);
-                            }
+                    let mut title_text = snippet.title.clone();
+
+                    if let Some(desc) = &snippet.description {
+                        if !desc.is_empty() {
+                            let short_desc = if desc.len() > 30 {
+                                format!("{}...", &desc[0..27])
+                            } else {
+                                desc.clone()
+                            };
+                            title_text = format!("{} - {}", title_text, short_desc);
                         }
-
-                        let style = if i == app.selected_tree_item {
-                            Style::default().fg(RosePine::GOLD).bold()
-                        } else {
-                            Style::default().fg(RosePine::SUBTLE)
-                        };
-                        (name, style)
-                    } else {
-                        let indent = create_tree_indent(*depth, true);
-                        let icon = "✗";
-                        (
-                            format!("{}{} Unknown Snippet", indent, icon),
-                            Style::default().fg(RosePine::LOVE),
-                        )
                     }
-                }
-            };
 
-            ListItem::new(name).style(style)
+                    let spans = vec![
+                        Span::styled(indent_str, Style::default().fg(parent_color)),
+                        Span::styled(format!("{} ", icon), Style::default().fg(RosePine::GOLD)),
+                        Span::styled(
+                            title_text,
+                            if i == app.selected_tree_item {
+                                Style::default().fg(RosePine::GOLD).bold()
+                            } else {
+                                Style::default().fg(RosePine::SUBTLE)
+                            },
+                        ),
+                    ];
+
+                    ListItem::new(Line::from(spans))
+                } else {
+                    let indent_str = create_tree_indent(*depth, true);
+                    let icon = "✗";
+                    ListItem::new(format!("{}{} Unknown Snippet", indent_str, icon))
+                        .style(Style::default().fg(RosePine::LOVE))
+                }
+            }
         })
         .collect();
 
@@ -620,26 +774,6 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &mut App) {
     list_state.select(Some(app.selected_tree_item));
 
     frame.render_stateful_widget(list, inner_area, &mut list_state);
-}
-
-fn create_tree_indent(depth: usize, is_last_item: bool) -> String {
-    if depth == 0 {
-        return String::new();
-    }
-
-    let mut indent = String::new();
-
-    for _ in 0..depth - 1 {
-        indent.push_str("│ ");
-    }
-
-    if is_last_item {
-        indent.push_str("└──");
-    } else {
-        indent.push_str("├──");
-    }
-
-    indent
 }
 
 fn render_preview_panel(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -758,13 +892,23 @@ fn render_notebook_preview(
         .borders(ratatui::widgets::Borders::NONE);
     bg_block.render(area, frame.buffer_mut());
 
-    let chunks = Layout::vertical([Constraint::Length(8), Constraint::Fill(1)]).split(area);
+    let chunks = Layout::vertical([
+        Constraint::Length(10), // Notebook info
+        Constraint::Fill(1),    // Snippets list
+    ])
+    .split(area);
 
-    // Notebook info
+    let color_index = app.get_notebook_color(&notebook.id);
+    let colors = get_available_colors();
+    let notebook_color = colors
+        .get(color_index % colors.len())
+        .unwrap_or(&colors[0])
+        .1;
+
     let info_lines = vec![
         Line::from(vec![
             Span::styled("󰠮 ", Style::default().fg(RosePine::GOLD)),
-            Span::styled(&notebook.name, Style::default().fg(RosePine::TEXT).bold()),
+            Span::styled(&notebook.name, Style::default().fg(notebook_color).bold()),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -789,19 +933,24 @@ fn render_notebook_preview(
             ),
         ]),
         Line::from(""),
-        Line::from(if let Some(desc) = &notebook.description {
-            desc.clone()
-        } else {
-            "No description".to_string()
-        })
-        .style(Style::default().fg(RosePine::SUBTLE)),
     ];
 
-    let info_paragraph = Paragraph::new(info_lines).wrap(Wrap { trim: true });
+    // Get and display description without color prefix
+    let desc = notebook.description.clone().unwrap_or_default();
+    let desc_without_color = if desc.starts_with("[COLOR:") {
+        if let Some(end_idx) = desc.find(']') {
+            desc[end_idx + 1..].trim().to_string()
+        } else {
+            desc
+        }
+    } else {
+        desc
+    };
 
-    info_paragraph.render(chunks[0], frame.buffer_mut());
+    let mut all_lines = info_lines;
+    all_lines.push(Line::from(desc_without_color).style(Style::default().fg(RosePine::SUBTLE)));
 
-    // Show snippets in this notebook
+    // Get snippets for analytics
     let snippets: Vec<_> = app
         .snippet_database
         .snippets
@@ -809,9 +958,54 @@ fn render_notebook_preview(
         .filter(|s| s.notebook_id == notebook.id)
         .collect();
 
+    // Calculate total lines of code
+    let total_lines: usize = snippets.iter().map(|s| s.get_line_count()).sum();
+
+    // Count languages
+    let mut languages = std::collections::HashMap::new();
+    for snippet in &snippets {
+        *languages.entry(snippet.language.clone()).or_insert(0) += 1;
+    }
+
+    // Analytics section
+    all_lines.push(Line::from(""));
+    all_lines.push(Line::from(vec![Span::styled(
+        "Analytics: ",
+        Style::default().fg(RosePine::LOVE).bold(),
+    )]));
+    all_lines.push(Line::from(vec![
+        Span::styled("Total Lines: ", Style::default().fg(RosePine::MUTED)),
+        Span::styled(total_lines.to_string(), Style::default().fg(RosePine::GOLD)),
+    ]));
+
+    // Show top languages if any
+    if !languages.is_empty() {
+        // Sort languages by count
+        let mut lang_counts: Vec<_> = languages.into_iter().collect();
+        lang_counts.sort_by(|a, b| b.1.cmp(&a.1));
+
+        all_lines.push(Line::from(vec![
+            Span::styled("Top Languages: ", Style::default().fg(RosePine::MUTED)),
+            Span::styled(
+                lang_counts
+                    .iter()
+                    .take(2)
+                    .map(|(lang, _)| lang.short_name())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                Style::default().fg(RosePine::FOAM),
+            ),
+        ]));
+    }
+
+    let info_paragraph = Paragraph::new(all_lines).wrap(Wrap { trim: true });
+    info_paragraph.render(chunks[0], frame.buffer_mut());
+
+    // Show snippets in this notebook
     if !snippets.is_empty() {
         let snippet_items: Vec<ListItem> = snippets
             .iter()
+            .take(8) // Limit to first 8 snippets
             .map(|snippet| {
                 let icon = snippet.language.icon();
                 let name = format!(
@@ -1251,7 +1445,7 @@ fn render_search_view(frame: &mut Frame, area: Rect, _app: &mut App) {
     paragraph.render(area, frame.buffer_mut());
 }
 
-fn render_settings_view(frame: &mut Frame, area: Rect, _app: &App) {
+fn render_settings_view(frame: &mut Frame, area: Rect, app: &App) {
     let paragraph = Paragraph::new("Settings coming soon...")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::TEXT));

@@ -35,7 +35,7 @@ impl Default for AppState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CodeSnippetsState {
     NotebookList,
-    _NotebookView { notebook_id: Uuid },
+    NotebookView { notebook_id: Uuid },
     NotebookDetails { notebook_id: Uuid },
     _SnippetEditor { snippet_id: Uuid },
     _CreateNotebook,
@@ -86,6 +86,8 @@ pub struct App {
     pub needs_redraw: bool,
     pub content_scroll_position: usize,
     pub selected_details_tab: usize,
+    #[allow(dead_code)]
+    pub notebook_color: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,12 +101,14 @@ pub enum InputMode {
     CreateNotebook,
     CreateNestedNotebook,
     CreateSnippet,
-    SelectLanguage,
-    Search,
-    HelpMenu,
     _RenameNotebook,
     _RenameSnippet,
     EditSnippetDescription,
+    SelectLanguage,
+    Search,
+    HelpMenu,
+    EditNotebookDescription,
+    SelectNotebookColor,
 }
 
 impl App {
@@ -144,6 +148,7 @@ impl App {
             needs_redraw: true,
             content_scroll_position: 0,
             selected_details_tab: 0,
+            notebook_color: None,
         };
 
         app.refresh_tree_items();
@@ -536,5 +541,67 @@ impl App {
     pub fn reset_scroll_position(&mut self) {
         self.content_scroll_position = 0;
         self.needs_redraw = true;
+    }
+
+    pub fn update_notebook_description(
+        &mut self,
+        notebook_id: Uuid,
+        description: String,
+    ) -> Result<(), String> {
+        if let Some(notebook) = self.snippet_database.notebooks.get_mut(&notebook_id) {
+            notebook.description = Some(description);
+            notebook.updated_at = chrono::Utc::now();
+            self.save_database()?;
+            Ok(())
+        } else {
+            Err("Notebook not found".to_string())
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn update_notebook_color(
+        &mut self,
+        notebook_id: Uuid,
+        color_index: usize,
+    ) -> Result<(), String> {
+        if let Some(notebook) = self.snippet_database.notebooks.get_mut(&notebook_id) {
+            // Store color index in a custom field or metadata
+            // For now, we'll use the description with a prefix to store the color
+            let desc = notebook.description.clone().unwrap_or_default();
+
+            // Extract description without color prefix if it exists
+            let desc_without_color = if desc.starts_with("[COLOR:") {
+                if let Some(end_idx) = desc.find(']') {
+                    desc[end_idx + 1..].trim().to_string()
+                } else {
+                    desc
+                }
+            } else {
+                desc
+            };
+
+            // Add color prefix to description
+            notebook.description = Some(format!("[COLOR:{}] {}", color_index, desc_without_color));
+            notebook.updated_at = chrono::Utc::now();
+            self.save_database()?;
+            Ok(())
+        } else {
+            Err("Notebook not found".to_string())
+        }
+    }
+
+    pub fn get_notebook_color(&self, notebook_id: &Uuid) -> usize {
+        if let Some(notebook) = self.snippet_database.notebooks.get(notebook_id) {
+            if let Some(desc) = &notebook.description {
+                if desc.starts_with("[COLOR:") {
+                    if let Some(end_idx) = desc.find(']') {
+                        if let Ok(color_idx) = desc[7..end_idx].parse::<usize>() {
+                            return color_idx;
+                        }
+                    }
+                }
+            }
+        }
+        0 // Default color index
     }
 }

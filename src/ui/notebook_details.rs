@@ -1,13 +1,15 @@
-use crate::app::{App, CodeSnippetsState};
+use crate::app::{App, CodeSnippetsState, InputMode};
 use crate::models::SnippetLanguage;
 use crate::ui::colors::RosePine;
 use ratatui::widgets::Widget;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
     text::{Line, Span},
-    widgets::{BarChart, Block, BorderType, Cell, Paragraph, Row, Table, Wrap},
+    widgets::{
+        BarChart, Block, BorderType, Cell, List, ListItem, ListState, Paragraph, Row, Table, Wrap,
+    },
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -43,8 +45,28 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
     let inner_area = block.inner(main_area);
     block.render(main_area, frame.buffer_mut());
 
+    // Get notebook color
+    let color_index = app.get_notebook_color(&notebook_id);
+    let colors = get_available_colors();
+    let notebook_color = colors
+        .get(color_index % colors.len())
+        .unwrap_or(&colors[0])
+        .1;
+
+    // Create a colored title block
+    let title_block = Block::default()
+        .title(format!(" {} Notebook Details: {} ", "", notebook.name))
+        .title_alignment(Alignment::Center)
+        .title_style(Style::default().fg(notebook_color).bold())
+        .border_type(BorderType::Rounded)
+        .borders(ratatui::widgets::Borders::TOP)
+        .style(Style::default().fg(notebook_color));
+
+    title_block.render(main_area, frame.buffer_mut());
+
     // Create a layout for the different sections
     let chunks = Layout::vertical([
+        Constraint::Length(3),  // Navigation bar
         Constraint::Length(10), // Overview information
         Constraint::Length(12), // Language distribution
         Constraint::Min(5),     // Snippets list
@@ -52,14 +74,52 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
     ])
     .split(inner_area);
 
+    // Render navigation bar
+    let nav_block = Block::bordered()
+        .title(" Actions ")
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
+
+    let nav_area = nav_block.inner(chunks[0]);
+    nav_block.render(chunks[0], frame.buffer_mut());
+
+    let nav_buttons = vec![
+        ("e", "Edit Description"),
+        ("c", "Change Color"),
+        ("s", "New Snippet"),
+    ];
+
+    let button_width = nav_area.width / nav_buttons.len() as u16;
+    let button_areas = Layout::horizontal(
+        nav_buttons
+            .iter()
+            .map(|_| Constraint::Length(button_width))
+            .collect::<Vec<_>>(),
+    )
+    .split(nav_area);
+
+    for (i, (key, label)) in nav_buttons.iter().enumerate() {
+        let button_text = format!(" {} {} ", key, label);
+        let button = Paragraph::new(button_text)
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(RosePine::TEXT)
+                    .bg(RosePine::HIGHLIGHT_LOW),
+            );
+
+        button.render(button_areas[i], frame.buffer_mut());
+    }
+
     // Render status line
-    let status_text = "← Back (Esc) • 's' to Create Snippet";
+    let status_text =
+        "← Back (Esc) • 's' to Create Snippet • 'e' to Edit Description • 'c' to Change Color";
     let status = Paragraph::new(status_text)
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::MUTED));
-    status.render(chunks[3], frame.buffer_mut());
+    status.render(chunks[4], frame.buffer_mut());
 
-    // Calculate statisticss
+    // Calculate statistics
     let total_lines: usize = snippets.iter().map(|s| s.get_line_count()).sum();
 
     let avg_use_count = if !snippets.is_empty() {
@@ -108,8 +168,8 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
-    let overview_area = overview_block.inner(chunks[0]);
-    overview_block.render(chunks[0], frame.buffer_mut());
+    let overview_area = overview_block.inner(chunks[1]);
+    overview_block.render(chunks[1], frame.buffer_mut());
 
     let overview_chunks = Layout::horizontal([
         Constraint::Percentage(60), // Basic info
@@ -215,8 +275,8 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
-    let lang_area = lang_block.inner(chunks[1]);
-    lang_block.render(chunks[1], frame.buffer_mut());
+    let lang_area = lang_block.inner(chunks[2]);
+    lang_block.render(chunks[2], frame.buffer_mut());
 
     if snippets.is_empty() {
         let no_data = Paragraph::new("No snippets in this notebook")
@@ -307,8 +367,8 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
-    let snippets_area = snippets_block.inner(chunks[2]);
-    snippets_block.render(chunks[2], frame.buffer_mut());
+    let snippets_area = snippets_block.inner(chunks[3]);
+    snippets_block.render(chunks[3], frame.buffer_mut());
 
     if snippets.is_empty() {
         let no_snippets =
@@ -363,4 +423,222 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
 
         table.render(snippets_area, frame.buffer_mut());
     }
+
+    // Note: DO NOT return from this function early if in edit mode,
+    // as we need to render overlays on top
+
+    // Render overlays on top of everything else
+    match app.input_mode {
+        InputMode::EditNotebookDescription => {
+            render_edit_description_overlay(frame, main_area, app);
+        }
+        InputMode::SelectNotebookColor => {
+            render_color_selection_overlay(frame, main_area, app);
+        }
+        InputMode::Normal => {
+            if let Some(ref message) = app.error_message {
+                render_message_overlay(frame, main_area, message, true);
+            } else if let Some(ref message) = app.success_message {
+                render_message_overlay(frame, main_area, message, false);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
+    vec![
+        ("Default", RosePine::TEXT),
+        ("Red", RosePine::LOVE),
+        ("Orange", RosePine::GOLD),
+        ("Green", RosePine::FOAM),
+        ("Blue", RosePine::IRIS),
+        ("Purple", RosePine::IRIS),
+        ("Pink", RosePine::ROSE),
+        ("White", ratatui::style::Color::White),
+    ]
+}
+
+fn render_edit_description_overlay(frame: &mut Frame, area: Rect, app: &mut App) {
+    let popup_area = spotlight_bar(70, area);
+
+    ratatui::widgets::Clear.render(popup_area, frame.buffer_mut());
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE).bg(RosePine::SURFACE));
+
+    let inner_area = block.inner(popup_area);
+    block.render(popup_area, frame.buffer_mut());
+
+    let title = "Edit Notebook Description";
+    let chunks = Layout::horizontal([
+        Constraint::Length(title.len() as u16 + 4),
+        Constraint::Min(10),
+        Constraint::Length(24),
+    ])
+    .split(inner_area);
+
+    let title_paragraph = Paragraph::new(title)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(RosePine::IRIS).bold());
+    title_paragraph.render(chunks[0], frame.buffer_mut());
+
+    let input_text = format!("{}", app.input_buffer);
+    let input_paragraph = Paragraph::new(input_text)
+        .style(Style::default().fg(RosePine::TEXT))
+        .alignment(Alignment::Left);
+    input_paragraph.render(chunks[1], frame.buffer_mut());
+
+    let help_text = "⎋ Cancel • ⏎ Confirm";
+    let help_paragraph = Paragraph::new(help_text)
+        .alignment(Alignment::Right)
+        .style(Style::default().fg(RosePine::MUTED));
+    help_paragraph.render(chunks[2], frame.buffer_mut());
+}
+
+fn render_color_selection_overlay(frame: &mut Frame, area: Rect, app: &mut App) {
+    let popup_area = spotlight_bar(70, area);
+
+    ratatui::widgets::Clear.render(popup_area, frame.buffer_mut());
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE).bg(RosePine::SURFACE));
+
+    let inner_area = block.inner(popup_area);
+    block.render(popup_area, frame.buffer_mut());
+
+    let title = "Select Notebook Color";
+    let chunks = Layout::horizontal([
+        Constraint::Length(title.len() as u16 + 4),
+        Constraint::Min(10),
+        Constraint::Length(24),
+    ])
+    .split(inner_area);
+
+    let title_paragraph = Paragraph::new(title)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(RosePine::IRIS).bold());
+    title_paragraph.render(chunks[0], frame.buffer_mut());
+
+    let colors = get_available_colors();
+    let selected_color = &colors[app.selected_language % colors.len()];
+    let selected_text = format!("■ {}", selected_color.0);
+
+    let dropdown_paragraph = Paragraph::new(selected_text)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(selected_color.1));
+    dropdown_paragraph.render(chunks[1], frame.buffer_mut());
+
+    let help_text = "↑↓ Navigate • ⏎ Select";
+    let help_paragraph = Paragraph::new(help_text)
+        .alignment(Alignment::Right)
+        .style(Style::default().fg(RosePine::MUTED));
+    help_paragraph.render(chunks[2], frame.buffer_mut());
+
+    let list_area = Rect::new(
+        area.x + area.width / 4,
+        popup_area.y + popup_area.height + 1,
+        area.width / 2,
+        10,
+    );
+
+    ratatui::widgets::Clear.render(list_area, frame.buffer_mut());
+
+    let list_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE));
+
+    let inner_list_area = list_block.inner(list_area);
+    list_block.render(list_area, frame.buffer_mut());
+
+    let color_items: Vec<ListItem> = colors
+        .iter()
+        .enumerate()
+        .map(|(i, (name, color))| {
+            let content = format!("■ {}", name);
+
+            let style = if i == app.selected_language % colors.len() {
+                Style::default().fg(*color).bold()
+            } else {
+                Style::default().fg(*color)
+            };
+
+            ListItem::new(content).style(style)
+        })
+        .collect();
+
+    let color_list = List::new(color_items)
+        .highlight_style(
+            Style::default()
+                .fg(RosePine::BASE)
+                .bg(RosePine::LOVE)
+                .bold(),
+        )
+        .highlight_symbol("▶ ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.selected_language % colors.len()));
+
+    frame.render_stateful_widget(color_list, inner_list_area, &mut list_state);
+}
+
+fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error: bool) {
+    let popup_area = spotlight_bar(70, area);
+
+    ratatui::widgets::Clear.render(popup_area, frame.buffer_mut());
+
+    let (icon, color) = if is_error {
+        ("✗", RosePine::LOVE)
+    } else {
+        ("✓", RosePine::FOAM)
+    };
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE).bg(RosePine::SURFACE));
+
+    let inner_area = block.inner(popup_area);
+    block.render(popup_area, frame.buffer_mut());
+
+    let chunks = Layout::horizontal([
+        Constraint::Length(3),
+        Constraint::Min(10),
+        Constraint::Length(24),
+    ])
+    .split(inner_area);
+
+    let icon_paragraph = Paragraph::new(icon)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(color).bold());
+    icon_paragraph.render(chunks[0], frame.buffer_mut());
+
+    let message_paragraph = Paragraph::new(message)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(RosePine::TEXT));
+    message_paragraph.render(chunks[1], frame.buffer_mut());
+
+    let help_text = "Press any key to dismiss";
+    let help_paragraph = Paragraph::new(help_text)
+        .alignment(Alignment::Right)
+        .style(Style::default().fg(RosePine::MUTED));
+    help_paragraph.render(chunks[2], frame.buffer_mut());
+}
+
+// Helper function to create a centered bar for overlays
+fn spotlight_bar(width_percent: u16, r: Rect) -> Rect {
+    let layout = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Min(1),
+    ])
+    .split(r);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - width_percent) / 2),
+        Constraint::Percentage(width_percent),
+        Constraint::Percentage((100 - width_percent) / 2),
+    ])
+    .split(layout[1])[1]
 }
