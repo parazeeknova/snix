@@ -1,5 +1,6 @@
 use crate::models::{CodeSnippet, Notebook, SnippetDatabase, SnippetLanguage, StorageManager};
 use crate::ui::{code_snippets, components, start_page};
+use chrono::Utc;
 use ratatui::Frame;
 use uuid::Uuid;
 
@@ -100,6 +101,7 @@ pub enum InputMode {
     HelpMenu,
     _RenameNotebook,
     _RenameSnippet,
+    EditSnippetDescription,
 }
 
 impl App {
@@ -500,6 +502,29 @@ impl App {
             AppState::Settings => {
                 components::render_wip_dialog(frame, frame.area(), " Settings", self)
             }
+        }
+    }
+
+    pub fn update_snippet_description(
+        &mut self,
+        snippet_id: Uuid,
+        description: String,
+    ) -> Result<(), String> {
+        if let Some(snippet) = self.snippet_database.snippets.get_mut(&snippet_id) {
+            snippet.description = if description.is_empty() {
+                None
+            } else {
+                Some(description)
+            };
+            snippet.updated_at = Utc::now();
+
+            if let Err(e) = self.save_database() {
+                return Err(format!("Failed to save description: {}", e));
+            }
+
+            Ok(())
+        } else {
+            Err("Snippet not found".to_string())
         }
     }
 }

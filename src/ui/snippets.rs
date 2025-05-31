@@ -9,7 +9,7 @@ fn get_bat_highlighted_content(snippet: &CodeSnippet, app: &App) -> Option<Strin
         let output = std::process::Command::new("bat")
             .arg("--color=always")
             .arg("--style=numbers,grid")
-            .arg("--theme=TwoDark")
+            .arg("--theme=OneHalfLight")
             .arg("--line-range=:1000")
             .arg("--terminal-width=80")
             .arg(&file_path)

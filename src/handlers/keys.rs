@@ -7,6 +7,8 @@
 use crate::app::{App, AppState, CodeSnippetsState, InputMode, TreeItem};
 use crate::models::SnippetLanguage;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 /// Main keyboard event handler and dispatcher
 /// This is the primary entry point for all keyboard input processing. It receives
@@ -199,6 +201,25 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     app.code_snippets_state = CodeSnippetsState::SearchSnippets;
                     app.clear_messages();
                 }
+                InputMode::EditSnippetDescription => {
+                    // Get the snippet ID from the selected item
+                    if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                        match app.update_snippet_description(*snippet_id, input) {
+                            Ok(_) => {
+                                app.set_success_message(
+                                    "Description updated successfully".to_string(),
+                                );
+                            }
+                            Err(e) => {
+                                app.set_error_message(e);
+                            }
+                        }
+                    } else {
+                        app.set_error_message("Snippet selection lost".to_string());
+                    }
+                    app.input_mode = InputMode::Normal;
+                    app.pending_snippet_title.clear();
+                }
                 _ => {
                     app.input_mode = InputMode::Normal;
                     app.clear_messages();
@@ -389,49 +410,50 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
-        // Delete selected item
-        KeyCode::Delete | KeyCode::Char('d') | KeyCode::Char('D') => {
+        // Delete selected item (notebook or snippet)
+        KeyCode::Char('x') | KeyCode::Char('X') => {
             app.clear_messages();
             if let Some(selected_item) = app.get_selected_item().cloned() {
                 match selected_item {
                     TreeItem::Notebook(notebook_id, _) => {
-                        // Show confirmation for notebook deletion
-                        if let Some(notebook) = app.snippet_database.notebooks.get(&notebook_id) {
-                            if notebook.snippet_count > 0 {
-                                app.set_error_message(format!("Cannot delete '{}': contains {} snippets. Delete snippets first.", notebook.name, notebook.snippet_count));
-                            } else {
-                                match app.delete_notebook(notebook_id) {
-                                    Ok(_) => {
-                                        app.set_success_message(
-                                            "Notebook deleted successfully!".to_string(),
-                                        );
-                                    }
-                                    Err(e) => {
-                                        app.set_error_message(e);
-                                    }
-                                }
-                            }
+                        // Check if this notebook has snippets or nested notebooks
+                        let has_snippets = app
+                            .snippet_database
+                            .snippets
+                            .values()
+                            .any(|s| s.notebook_id == notebook_id);
+
+                        let has_children = app
+                            .snippet_database
+                            .notebooks
+                            .values()
+                            .any(|n| n.parent_id == Some(notebook_id));
+
+                        if has_snippets || has_children {
+                            app.set_error_message(
+                                "Cannot delete a notebook that contains snippets or other notebooks"
+                                    .to_string(),
+                            );
+                            return false;
+                        }
+
+                        // Safe to delete
+                        if let Err(e) = app.delete_notebook(notebook_id) {
+                            app.set_error_message(e);
+                        } else {
+                            app.set_success_message("Notebook deleted successfully".to_string());
                         }
                     }
                     TreeItem::Snippet(snippet_id, _) => {
-                        if let Some(snippet) = app.snippet_database.snippets.get(&snippet_id) {
-                            let snippet_name = snippet.title.clone();
-                            match app.delete_snippet(snippet_id) {
-                                Ok(_) => {
-                                    app.set_success_message(format!(
-                                        "Snippet '{}' deleted successfully!",
-                                        snippet_name
-                                    ));
-                                }
-                                Err(e) => {
-                                    app.set_error_message(e);
-                                }
-                            }
+                        if let Err(e) = app.delete_snippet(snippet_id) {
+                            app.set_error_message(e);
+                        } else {
+                            app.set_success_message("Snippet deleted successfully".to_string());
                         }
                     }
                 }
             } else {
-                app.set_error_message("No item selected to delete".to_string());
+                app.set_error_message("No item selected".to_string());
             }
             false
         }
@@ -492,6 +514,74 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
+        // Copy snippet to clipboard
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            app.clear_messages();
+            if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                    // Try to use clipboard utilities in this order: xclip, wl-copy, termux-clipboard-set
+                    let success = if let Ok(mut xclip) = Command::new("xclip")
+                        .arg("-selection")
+                        .arg("clipboard")
+                        .stdin(Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(stdin) = xclip.stdin.as_mut() {
+                            stdin.write_all(snippet.content.as_bytes()).is_ok()
+                        } else {
+                            false
+                        }
+                    } else if let Ok(mut wlcopy) =
+                        Command::new("wl-copy").stdin(Stdio::piped()).spawn()
+                    {
+                        if let Some(stdin) = wlcopy.stdin.as_mut() {
+                            stdin.write_all(snippet.content.as_bytes()).is_ok()
+                        } else {
+                            false
+                        }
+                    } else if let Ok(mut termux) = Command::new("termux-clipboard-set")
+                        .stdin(Stdio::piped())
+                        .spawn()
+                    {
+                        if let Some(stdin) = termux.stdin.as_mut() {
+                            stdin.write_all(snippet.content.as_bytes()).is_ok()
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if success {
+                        app.set_success_message(format!("'{}' copied to clipboard", snippet.title));
+                    } else {
+                        app.set_error_message("Failed to copy to clipboard (xclip, wl-copy, or termux-clipboard-set required)".to_string());
+                    }
+                }
+            } else {
+                app.set_error_message("No snippet selected".to_string());
+            }
+            false
+        }
+
+        // Edit snippet description
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.clear_messages();
+            if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                    app.input_mode = InputMode::EditSnippetDescription;
+                    app.current_notebook_id = Some(snippet.notebook_id);
+                    app.input_buffer = snippet.description.clone().unwrap_or_default();
+                    app.pending_snippet_title = snippet.title.clone(); // Store snippet title for reference
+                } else {
+                    app.set_error_message("Snippet not found".to_string());
+                }
+            } else {
+                app.set_error_message("Select a snippet first".to_string());
+            }
+            false
+        }
+
         _ => false,
     }
 }
@@ -504,7 +594,6 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::U
             app.current_notebook_id = None;
             false
         }
-        // Add more notebook-specific keys here
         _ => false,
     }
 }
@@ -575,19 +664,16 @@ fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
         if let Some(ref storage) = app.storage_manager {
             let file_path = storage.get_snippet_file_path(snippet);
 
-            // Ensure the file exists with current content
             if let Err(e) = storage.save_snippet_content(snippet) {
                 app.set_error_message(format!("Failed to prepare file for editing: {}", e));
                 return;
             }
 
-            // Properly suspend the current TUI application
             if let Err(e) = suspend_tui_for_editor(&file_path) {
                 app.set_error_message(format!("Failed to launch editor: {}", e));
                 return;
             }
 
-            // Reload snippet content after editing
             if let Ok(content) = storage.load_snippet_content(
                 snippet.id,
                 snippet.notebook_id,
@@ -596,7 +682,6 @@ fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
                 if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
                     snippet.update_content(content);
 
-                    // Save changes
                     if let Err(e) = storage.save_snippet_content(snippet) {
                         app.set_error_message(format!("Failed to save snippet: {}", e));
                     } else {
@@ -605,7 +690,6 @@ fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
                         } else {
                             app.set_success_message("Snippet saved successfully!".to_string());
 
-                            // Ensure we're back in the snippets list view
                             app.code_snippets_state = CodeSnippetsState::NotebookList;
                             app.refresh_tree_items();
                         }
@@ -625,7 +709,6 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
     use std::io::{Write, stdout};
     use std::process::Command;
 
-    // First completely exit the terminal UI
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen)?;
 
