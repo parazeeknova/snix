@@ -86,7 +86,7 @@ fn get_context_shortcuts(app: &mut App) -> String {
                 format!("{} [n] New Notebook │ [h] Home │ [q] Quit ", back_hint)
             } else {
                 format!(
-                    "{} [n] Root Notebook │ [b] Nested Notebook │ [s] Snippet │ [d] Delete │ [/] Search │ [?] Help",
+                    "{} [n] Root Notebook │ [b] Nested Notebook │ [s] Snippet │ [?] Help",
                     back_hint
                 )
             }

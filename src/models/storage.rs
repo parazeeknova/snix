@@ -25,7 +25,6 @@ impl Default for SnippetDatabase {
 
 /// Storage Manager for disk operations
 #[derive(Debug)]
-// Prefix with underscore to mark as intentionally unused
 pub struct StorageManager {
     _data_dir: PathBuf,
     snippets_dir: PathBuf,
