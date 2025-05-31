@@ -64,8 +64,9 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from("Getting started:"),
         Line::from("• Press 'n' to create your first notebook"),
-        Line::from("• Notebooks can contain multiple snippets"),
-        Line::from("• You can create nested notebooks for better organization"),
+        Line::from("• Press 'b' to create a nested notebook inside another notebook"),
+        Line::from("• Press 's' to add code snippets to your notebooks"),
+        Line::from("• Notebooks are displayed with tree-sitter style indentation lines"),
         Line::from("• Use vim/nvim to edit your snippets with full LSP support"),
         Line::from(""),
         Line::from(Span::styled(
@@ -115,6 +116,7 @@ fn render_main_view(frame: &mut Frame, area: Rect, app: &App) {
 fn render_overlays(frame: &mut Frame, area: Rect, app: &App) {
     match app.input_mode {
         InputMode::CreateNotebook
+        | InputMode::CreateNestedNotebook
         | InputMode::CreateSnippet
         | InputMode::Search
         | InputMode::_RenameNotebook
@@ -285,7 +287,7 @@ fn get_available_languages() -> Vec<crate::models::SnippetLanguage> {
 
 fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
-        .title("  Notebooks & Snippets ")
+        .title("  Notebooks & Snippets ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
@@ -305,42 +307,47 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let (_icon, name, style) = match item {
-                TreeItem::Notebook(id) => {
+            let (name, style) = match item {
+                TreeItem::Notebook(id, depth) => {
                     if let Some(notebook) = app.snippet_database.notebooks.get(id) {
-                        let icon = " ";
-                        let name =
-                            format!("{} {} ({})", icon, notebook.name, notebook.snippet_count);
+                        // Create tree indentation with lines
+                        let indent = create_tree_indent(*depth, false);
+                        let icon = "📁";
+                        let name = format!(
+                            "{}{} {} ({})",
+                            indent, icon, notebook.name, notebook.snippet_count
+                        );
                         let style = if i == app.selected_tree_item {
                             Style::default().fg(RosePine::LOVE).bold()
                         } else {
                             Style::default().fg(RosePine::TEXT)
                         };
-                        (icon, name, style)
+                        (name, style)
                     } else {
+                        let indent = create_tree_indent(*depth, false);
                         let icon = "✗";
                         (
-                            icon,
-                            "Unknown Notebook".to_string(),
+                            format!("{}{} Unknown Notebook", indent, icon),
                             Style::default().fg(RosePine::LOVE),
                         )
                     }
                 }
-                TreeItem::Snippet(id) => {
+                TreeItem::Snippet(id, depth) => {
                     if let Some(snippet) = app.snippet_database.snippets.get(id) {
+                        let indent = create_tree_indent(*depth, true);
                         let icon = snippet.language.icon();
-                        let name = format!("   {} {}", icon, snippet.title,);
+                        let name = format!("{}{} {}", indent, icon, snippet.title);
                         let style = if i == app.selected_tree_item {
                             Style::default().fg(RosePine::GOLD).bold()
                         } else {
                             Style::default().fg(RosePine::SUBTLE)
                         };
-                        (icon, name, style)
+                        (name, style)
                     } else {
+                        let indent = create_tree_indent(*depth, true);
                         let icon = "✗";
                         (
-                            icon,
-                            "   Unknown Snippet".to_string(),
+                            format!("{}{} Unknown Snippet", indent, icon),
                             Style::default().fg(RosePine::LOVE),
                         )
                     }
@@ -366,6 +373,30 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_stateful_widget(list, inner_area, &mut list_state);
 }
 
+/// Creates a tree-sitter style indentation with vertical lines
+fn create_tree_indent(depth: usize, is_last_item: bool) -> String {
+    if depth == 0 {
+        return String::new();
+    }
+
+    let mut indent = String::new();
+
+    // Add vertical lines for each level of depth
+    for _ in 0..depth - 1 {
+        indent.push_str("│ ");
+    }
+
+    // Add the corner or T-junction for the last level
+    if is_last_item {
+        // For snippets (last items), use a different style
+        indent.push_str("└──"); // └── (longer dash for better visibility)
+    } else {
+        indent.push_str("├──"); // ├── (longer dash for better visibility)
+    }
+
+    indent
+}
+
 fn render_preview_panel(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
         .title("  Preview ")
@@ -377,12 +408,12 @@ fn render_preview_panel(frame: &mut Frame, area: Rect, app: &App) {
 
     if let Some(selected_item) = app.get_selected_item() {
         match selected_item {
-            TreeItem::Notebook(id) => {
+            TreeItem::Notebook(id, _) => {
                 if let Some(notebook) = app.snippet_database.notebooks.get(id) {
                     render_notebook_preview(frame, inner_area, notebook, app);
                 }
             }
-            TreeItem::Snippet(id) => {
+            TreeItem::Snippet(id, _) => {
                 if let Some(snippet) = app.snippet_database.snippets.get(id) {
                     render_snippet_preview(frame, inner_area, snippet);
                 }
@@ -657,6 +688,7 @@ fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
 
     let title = match app.input_mode {
         InputMode::CreateNotebook => " Create New Notebook ",
+        InputMode::CreateNestedNotebook => " Create Nested Notebook ",
         InputMode::CreateSnippet => " Create New Snippet ",
         InputMode::Search => " Search Snippets ",
         InputMode::_RenameNotebook => " Rename Notebook ",

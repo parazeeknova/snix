@@ -61,10 +61,34 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
             match app.input_mode.clone() {
                 InputMode::CreateNotebook => {
                     if !input.is_empty() {
+                        // Clear current_notebook_id to create a root notebook
+                        app.current_notebook_id = None;
                         match app.create_notebook(input) {
                             Ok(_) => {
                                 app.set_success_message(
                                     "Notebook created successfully!".to_string(),
+                                );
+                            }
+                            Err(e) => {
+                                app.set_error_message(e);
+                            }
+                        }
+                    }
+                    app.input_mode = InputMode::Normal;
+                }
+                InputMode::CreateNestedNotebook => {
+                    if !input.is_empty() {
+                        // current_notebook_id or selected notebook will be used as parent
+                        if app.current_notebook_id.is_none() {
+                            if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
+                                app.current_notebook_id = Some(*id);
+                            }
+                        }
+
+                        match app.create_notebook(input) {
+                            Ok(_) => {
+                                app.set_success_message(
+                                    "Nested notebook created successfully!".to_string(),
                                 );
                             }
                             Err(e) => {
@@ -291,11 +315,11 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 
             if let Some(selected_item) = app.get_selected_item().cloned() {
                 match selected_item {
-                    TreeItem::Notebook(notebook_id) => {
+                    TreeItem::Notebook(notebook_id, _) => {
                         app.current_notebook_id = Some(notebook_id);
                         app.code_snippets_state = CodeSnippetsState::NotebookView { notebook_id };
                     }
-                    TreeItem::Snippet(snippet_id) => {
+                    TreeItem::Snippet(snippet_id, _) => {
                         if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
                             snippet.mark_accessed();
                         }
@@ -309,8 +333,28 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 
         KeyCode::Char('n') | KeyCode::Char('N') => {
             app.clear_messages();
+            // Create a root notebook (no parent)
             app.input_mode = InputMode::CreateNotebook;
             app.input_buffer.clear();
+            false
+        }
+
+        KeyCode::Char('b') | KeyCode::Char('B') => {
+            app.clear_messages();
+            // Create a nested notebook inside the currently selected notebook
+            if let Some(TreeItem::Notebook(_, _)) = app.get_selected_item() {
+                app.input_mode = InputMode::CreateNestedNotebook;
+                app.input_buffer.clear();
+            } else if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                // If a snippet is selected, use its notebook as parent
+                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                    app.current_notebook_id = Some(snippet.notebook_id);
+                    app.input_mode = InputMode::CreateNestedNotebook;
+                    app.input_buffer.clear();
+                }
+            } else {
+                app.set_error_message("Select a notebook first".to_string());
+            }
             false
         }
 
@@ -338,7 +382,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             app.clear_messages();
             if let Some(selected_item) = app.get_selected_item().cloned() {
                 match selected_item {
-                    TreeItem::Notebook(notebook_id) => {
+                    TreeItem::Notebook(notebook_id, _) => {
                         // Show confirmation for notebook deletion
                         if let Some(notebook) = app.snippet_database.notebooks.get(&notebook_id) {
                             if notebook.snippet_count > 0 {
@@ -357,7 +401,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                             }
                         }
                     }
-                    TreeItem::Snippet(snippet_id) => {
+                    TreeItem::Snippet(snippet_id, _) => {
                         if let Some(snippet) = app.snippet_database.snippets.get(&snippet_id) {
                             let snippet_name = snippet.title.clone();
                             match app.delete_snippet(snippet_id) {
@@ -495,12 +539,12 @@ fn get_current_notebook_id(app: &App) -> Option<uuid::Uuid> {
     }
 
     // Try to get notebook from selected tree item
-    if let Some(TreeItem::Notebook(id)) = app.get_selected_item() {
+    if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
         return Some(*id);
     }
 
     // If selected item is a snippet, get its notebook
-    if let Some(TreeItem::Snippet(snippet_id)) = app.get_selected_item() {
+    if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
         if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
             return Some(snippet.notebook_id);
         }

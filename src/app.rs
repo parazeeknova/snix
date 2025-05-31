@@ -45,8 +45,8 @@ pub enum CodeSnippetsState {
 /// Tree view item types for navigation
 #[derive(Debug, Clone, PartialEq)]
 pub enum TreeItem {
-    Notebook(Uuid),
-    Snippet(Uuid),
+    Notebook(Uuid, usize), // Added depth parameter for indentation
+    Snippet(Uuid, usize),  // Added depth parameter for indentation
 }
 
 /// Main Application State Container
@@ -92,6 +92,7 @@ pub enum SortBy {
 pub enum InputMode {
     Normal,
     CreateNotebook,
+    CreateNestedNotebook,
     CreateSnippet,
     SelectLanguage,
     Search,
@@ -226,8 +227,8 @@ impl App {
         }
     }
 
-    fn add_notebook_to_tree(&mut self, notebook_id: Uuid, _depth: usize) {
-        self.tree_items.push(TreeItem::Notebook(notebook_id));
+    fn add_notebook_to_tree(&mut self, notebook_id: Uuid, depth: usize) {
+        self.tree_items.push(TreeItem::Notebook(notebook_id, depth));
 
         let snippets: Vec<_> = self
             .snippet_database
@@ -238,13 +239,14 @@ impl App {
             .collect();
 
         for snippet_id in snippets {
-            self.tree_items.push(TreeItem::Snippet(snippet_id));
+            self.tree_items
+                .push(TreeItem::Snippet(snippet_id, depth + 1));
         }
 
         if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id) {
             let children = notebook.children.clone();
             for child_id in children {
-                self.add_notebook_to_tree(child_id, _depth + 1);
+                self.add_notebook_to_tree(child_id, depth + 1);
             }
         }
     }
@@ -270,7 +272,23 @@ impl App {
             return Err("Notebook name cannot be empty".to_string());
         }
 
-        let notebook = if let Some(parent_id) = self.current_notebook_id {
+        // Determine parent notebook ID from either current_notebook_id or selected tree item
+        let parent_id = if let Some(id) = self.current_notebook_id {
+            Some(id)
+        } else if let Some(TreeItem::Notebook(id, _)) = self.get_selected_item() {
+            Some(*id)
+        } else if let Some(TreeItem::Snippet(snippet_id, _)) = self.get_selected_item() {
+            // If a snippet is selected, use its notebook as parent
+            if let Some(snippet) = self.snippet_database.snippets.get(snippet_id) {
+                Some(snippet.notebook_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let notebook = if let Some(parent_id) = parent_id {
             Notebook::new_with_parent(name, parent_id)
         } else {
             Notebook::new(name)
@@ -422,6 +440,17 @@ impl App {
 
     pub fn get_selected_item(&self) -> Option<&TreeItem> {
         self.tree_items.get(self.selected_tree_item)
+    }
+
+    pub fn get_selected_item_id(&self) -> Option<(Uuid, bool)> {
+        if let Some(item) = self.get_selected_item() {
+            match item {
+                TreeItem::Notebook(id, _) => Some((*id, true)),
+                TreeItem::Snippet(id, _) => Some((*id, false)),
+            }
+        } else {
+            None
+        }
     }
 
     pub fn save_database(&self) -> Result<(), String> {
