@@ -1,7 +1,7 @@
 <div align="center">
 
- ## Snix ⚡
- **Fast terminal-based boilerplate and code snippet manager for developers**
+  ## Snix ⚡
+  **Fast terminal-based boilerplate and code snippet manager for developers**
 </div>
 
 <div align="center">
@@ -40,10 +40,10 @@ cd snix
 cargo check
 
 # Run with debug info
-cargo run
+cargo run # or make run
 
 # Build optimized release
-cargo build --release
+cargo build --release # or make release && make install to install globally
 ```
 
 ## 🤝 Contributing

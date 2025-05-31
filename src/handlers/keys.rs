@@ -136,12 +136,29 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 }
                 InputMode::CreateNestedNotebook => {
                     if !input.is_empty() {
-                        // current_notebook_id or selected notebook will be used as parent
-                        if app.current_notebook_id.is_none() {
+                        // Capture the parent notebook ID temporarily for this operation
+                        let parent_id = if app.current_notebook_id.is_none() {
                             if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
-                                app.current_notebook_id = Some(*id);
+                                Some(*id)
+                            } else if let Some(TreeItem::Snippet(snippet_id, _)) =
+                                app.get_selected_item()
+                            {
+                                // If a snippet is selected, use its notebook as parent
+                                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id)
+                                {
+                                    Some(snippet.notebook_id)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
                             }
-                        }
+                        } else {
+                            app.current_notebook_id
+                        };
+
+                        // Store the parent ID temporarily
+                        app.current_notebook_id = parent_id;
 
                         match app.create_notebook(input) {
                             Ok(_) => {
@@ -153,6 +170,9 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                                 app.set_error_message(e);
                             }
                         }
+
+                        // Reset current_notebook_id after creating the nested notebook
+                        app.current_notebook_id = None;
                     }
                     app.input_mode = InputMode::Normal;
                 }
@@ -475,24 +495,44 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         KeyCode::Char('n') | KeyCode::Char('N') => {
             app.clear_messages();
             // Create a root notebook (no parent)
+            // Explicitly reset both current_notebook_id and hovered_tree_item to ensure
+            // we always create a root notebook regardless of hover state
+            app.current_notebook_id = None;
+            // Temporarily store the current hovered state
+            let prev_hovered = app.hovered_tree_item;
+            // Reset hover state to avoid it influencing notebook creation
+            app.hovered_tree_item = None;
+
             app.input_mode = InputMode::CreateNotebook;
             app.input_buffer.clear();
+
+            // Restore hovered state after setting up the notebook creation
+            app.hovered_tree_item = prev_hovered;
             false
         }
 
         KeyCode::Char('b') | KeyCode::Char('B') => {
             app.clear_messages();
             // Create a nested notebook inside the currently selected notebook
-            if let Some(TreeItem::Notebook(_, _)) = app.get_selected_item() {
-                app.input_mode = InputMode::CreateNestedNotebook;
-                app.input_buffer.clear();
+            let has_parent = if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
+                // Temporarily store the parent notebook ID
+                app.current_notebook_id = Some(*id);
+                true
             } else if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
                 // If a snippet is selected, use its notebook as parent
                 if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
                     app.current_notebook_id = Some(snippet.notebook_id);
-                    app.input_mode = InputMode::CreateNestedNotebook;
-                    app.input_buffer.clear();
+                    true
+                } else {
+                    false
                 }
+            } else {
+                false
+            };
+
+            if has_parent {
+                app.input_mode = InputMode::CreateNestedNotebook;
+                app.input_buffer.clear();
             } else {
                 app.set_error_message("Select a notebook first".to_string());
             }

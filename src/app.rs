@@ -290,20 +290,30 @@ impl App {
             return Err("Notebook name cannot be empty".to_string());
         }
 
-        // Determine parent notebook ID from either current_notebook_id or selected tree item
-        let parent_id = if let Some(id) = self.current_notebook_id {
-            Some(id)
-        } else if let Some(TreeItem::Notebook(id, _)) = self.get_selected_item() {
-            Some(*id)
-        } else if let Some(TreeItem::Snippet(snippet_id, _)) = self.get_selected_item() {
-            // If a snippet is selected, use its notebook as parent
-            if let Some(snippet) = self.snippet_database.snippets.get(snippet_id) {
-                Some(snippet.notebook_id)
-            } else {
-                None
+        // Determine parent notebook ID based on the input mode and current state
+        let parent_id = match self.input_mode {
+            // For normal notebook creation, always create a root notebook
+            InputMode::CreateNotebook => None,
+
+            // For nested notebook creation, use the current_notebook_id
+            InputMode::CreateNestedNotebook => {
+                if let Some(id) = self.current_notebook_id {
+                    Some(id)
+                } else if let Some(TreeItem::Notebook(id, _)) = self.get_selected_item() {
+                    Some(*id)
+                } else if let Some(TreeItem::Snippet(snippet_id, _)) = self.get_selected_item() {
+                    // If a snippet is selected, use its notebook as parent
+                    if let Some(snippet) = self.snippet_database.snippets.get(snippet_id) {
+                        Some(snippet.notebook_id)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             }
-        } else {
-            None
+
+            _ => self.current_notebook_id,
         };
 
         let notebook = if let Some(parent_id) = parent_id {
