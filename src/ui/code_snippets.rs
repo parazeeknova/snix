@@ -166,7 +166,7 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
 /// Render language selection overlay
 /// Renders a help menu overlay showing all available keyboard shortcuts
 fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
-    let width = 60;
+    let width = 70;
     let height = 36;
     let popup_area = Rect::new(
         area.width.saturating_sub(width + 2),
@@ -186,7 +186,13 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
     let inner_area = block.inner(popup_area);
     block.render(popup_area, frame.buffer_mut());
 
-    let shortcuts = vec![
+    // Split the shortcuts into a two-column layout
+    let columns = Layout::horizontal([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ]).split(inner_area);
+    
+    let left_column = vec![
         Line::from(Span::styled(
             "Navigation",
             Style::default().fg(RosePine::LOVE).bold(),
@@ -220,27 +226,11 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled("  b   ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Create nested notebook (when notebook selected)"),
+            Span::raw("Create nested notebook"),
         ]),
         Line::from(vec![
             Span::styled("  Space", Style::default().fg(RosePine::GOLD)),
             Span::raw("Collapse/expand notebook"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+↑", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Move notebook/snippet up one level in hierarchy (to parent)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+↓", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Move notebook/snippet down one level (to child or nested folder)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+→", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Move to next sibling notebook (horizontal movement)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+←", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Move to previous sibling notebook (horizontal movement)"),
         ]),
         Line::from(vec![
             Span::styled("  v   ", Style::default().fg(RosePine::GOLD)),
@@ -255,6 +245,44 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
             Span::raw("Delete notebook/snippet"),
         ]),
         Line::from(""),
+        Line::from(Span::styled(
+            "Movement",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Shift+↑", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move up one level (to parent)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+↓", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move down one level (to child)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+→", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move to next sibling notebook"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+←", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move to previous sibling notebook"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Content Navigation",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  PgUp ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Scroll content up (5 lines)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  PgDn ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Scroll content down (5 lines)"),
+        ]),
+    ];
+    
+    let right_column = vec![
         Line::from(Span::styled(
             "Snippets",
             Style::default().fg(RosePine::LOVE).bold(),
@@ -300,7 +328,7 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Notebook Details",
+            "Notebook Details Actions",
             Style::default().fg(RosePine::LOVE).bold(),
         )),
         Line::from(""),
@@ -309,30 +337,16 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
             Span::raw("Create snippet in current notebook"),
         ]),
         Line::from(vec![
+            Span::styled("  e    ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Edit notebook description"),
+        ]),
+        Line::from(vec![
+            Span::styled("  c    ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Change notebook color"),
+        ]),
+        Line::from(vec![
             Span::styled("  Esc  ", Style::default().fg(RosePine::GOLD)),
             Span::raw("Return to notebook list"),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Content Navigation",
-            Style::default().fg(RosePine::LOVE).bold(),
-        )),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Shift+↑ ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Scroll content up one line"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+↓ ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Scroll content down one line"),
-        ]),
-        Line::from(vec![
-            Span::styled("  PgUp ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Scroll content up (5 lines)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  PgDn ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Scroll content down (5 lines)"),
         ]),
         Line::from(""),
         Line::from(Span::styled(
@@ -342,7 +356,6 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         Line::from(""),
         Line::from("• Full syntax highlighting for 20+ languages"),
         Line::from("• Copy to clipboard functionality"),
-        Line::from("• Snippet descriptions in tree view"),
         Line::from("• Content scrolling with scrollbar"),
         Line::from("• Detailed notebook statistics and graphs"),
         Line::from(""),
@@ -370,12 +383,18 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         )),
     ];
 
-    let help_paragraph = Paragraph::new(shortcuts)
+    let left_para = Paragraph::new(left_column)
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(RosePine::TEXT));
 
-    help_paragraph.render(inner_area, frame.buffer_mut());
+    let right_para = Paragraph::new(right_column)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(RosePine::TEXT));
+
+    left_para.render(columns[0], frame.buffer_mut());
+    right_para.render(columns[1], frame.buffer_mut());
 }
 
 fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &mut App) {

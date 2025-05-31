@@ -60,11 +60,7 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &mut App) {
 fn get_context_shortcuts(app: &mut App) -> String {
     use crate::app::{AppState, InputMode};
 
-    let back_hint = if app.can_go_back() {
-        " [←] Back │ "
-    } else {
-        ""
-    };
+    let back_hint = if app.can_go_back() { " [←] │ " } else { "" };
 
     match (&app.state, &app.input_mode) {
         (_, InputMode::CreateNotebook | InputMode::CreateSnippet | InputMode::Search) => {
@@ -115,7 +111,7 @@ fn get_context_shortcuts(app: &mut App) -> String {
                 };
 
                 format!(
-                    "{} [n] Root │ [b] Nested │ {} │ {} │ [?] Help",
+                    "{} [n] Root │ [b] Nested │ {} │ {} │ [?] ",
                     back_hint, collapse_text, move_hint
                 )
             }
@@ -217,7 +213,7 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                                         "  "
                                     };
 
-                                    format!("{}{}", name, collapse_indicator)
+                                    format!(" {}{}", name, collapse_indicator)
                                 } else {
                                     format!("   {} ", name)
                                 };

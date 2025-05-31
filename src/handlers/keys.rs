@@ -389,6 +389,21 @@ fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
 
 /// Handles keys for the main notebook list view
 fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
+    // Check if we have a pending confirmation
+    if app.has_pending_action() {
+        match key.code {
+            KeyCode::Enter => {
+                app.confirm_pending_action();
+                return false;
+            }
+            KeyCode::Esc => {
+                app.cancel_pending_action();
+                return false;
+            }
+            _ => return false, // Ignore other keys during confirmation
+        }
+    }
+
     if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
     {
         app.clear_messages();
@@ -593,19 +608,12 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                             return false;
                         }
 
-                        // Safe to delete
-                        if let Err(e) = app.delete_notebook(notebook_id) {
-                            app.set_error_message(e);
-                        } else {
-                            app.set_success_message("Notebook deleted successfully".to_string());
-                        }
+                        // Request confirmation for deletion
+                        app.request_delete_confirmation(notebook_id, true);
                     }
                     TreeItem::Snippet(snippet_id, _) => {
-                        if let Err(e) = app.delete_snippet(snippet_id) {
-                            app.set_error_message(e);
-                        } else {
-                            app.set_success_message("Snippet deleted successfully".to_string());
-                        }
+                        // Request confirmation for deletion
+                        app.request_delete_confirmation(snippet_id, false);
                     }
                 }
             } else {

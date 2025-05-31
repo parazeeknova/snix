@@ -62,6 +62,20 @@ pub enum TreeItem {
 /// style interactive elements based on the current state.
 
 #[derive(Debug)]
+pub enum ConfirmationState {
+    None,
+    DeleteItem {
+        item_id: Uuid,
+        is_notebook: bool,
+    },
+    MoveItem {
+        item_id: Uuid,
+        is_notebook: bool,
+        target_id: Uuid,
+    },
+}
+
+#[derive(Debug)]
 pub struct App {
     pub state: AppState,
     pub selected_menu_item: usize,
@@ -89,6 +103,7 @@ pub struct App {
     #[allow(dead_code)]
     pub notebook_color: Option<Uuid>,
     pub collapsed_notebooks: std::collections::HashSet<Uuid>,
+    pub confirmation_state: ConfirmationState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +166,7 @@ impl App {
             selected_details_tab: 0,
             notebook_color: None,
             collapsed_notebooks: std::collections::HashSet::new(),
+            confirmation_state: ConfirmationState::None,
         };
 
         app.refresh_tree_items();
@@ -1379,8 +1395,6 @@ impl App {
 
                                 // Save to make persistent
                                 let _ = self.save_database();
-
-                                // Update the tree view
                                 self.refresh_tree_items();
                                 self.needs_redraw = true;
 
@@ -1439,5 +1453,124 @@ impl App {
 
         self.set_error_message("Select a notebook or snippet to move".to_string());
         false
+    }
+
+    // Add these methods to handle confirmation states
+    /// Request confirmation for deleting an item
+    pub fn request_delete_confirmation(&mut self, item_id: Uuid, is_notebook: bool) {
+        self.confirmation_state = ConfirmationState::DeleteItem {
+            item_id,
+            is_notebook,
+        };
+        self.clear_messages();
+
+        // Set message based on item type
+        if is_notebook {
+            if let Some(notebook) = self.snippet_database.notebooks.get(&item_id) {
+                self.set_success_message(format!(
+                    "Are you sure you want to delete notebook '{}'?",
+                    notebook.name
+                ));
+            }
+        } else {
+            if let Some(snippet) = self.snippet_database.snippets.get(&item_id) {
+                self.set_success_message(format!(
+                    "Are you sure you want to delete snippet '{}'?",
+                    snippet.title
+                ));
+            }
+        }
+    }
+
+    /// Confirm the current pending action
+    pub fn confirm_pending_action(&mut self) -> bool {
+        match self.confirmation_state {
+            ConfirmationState::DeleteItem {
+                item_id,
+                is_notebook,
+            } => {
+                let result = if is_notebook {
+                    self.delete_notebook(item_id)
+                } else {
+                    self.delete_snippet(item_id)
+                };
+
+                // Reset confirmation state
+                self.confirmation_state = ConfirmationState::None;
+
+                match result {
+                    Ok(_) => {
+                        self.set_success_message(
+                            if is_notebook {
+                                "Notebook deleted successfully"
+                            } else {
+                                "Snippet deleted successfully"
+                            }
+                            .to_string(),
+                        );
+                        true
+                    }
+                    Err(e) => {
+                        self.set_error_message(e);
+                        false
+                    }
+                }
+            }
+            ConfirmationState::MoveItem {
+                item_id,
+                is_notebook,
+                target_id,
+            } => {
+                // Implementation depends on your existing move functions
+                let result = if is_notebook {
+                    // Call notebook move function
+                    // !TODO - one day bro one day
+                    todo!()
+                } else {
+                    // Move snippet to target notebook
+                    if let Some(snippet) = self.snippet_database.snippets.get_mut(&item_id) {
+                        snippet.notebook_id = target_id;
+                        snippet.updated_at = chrono::Utc::now();
+                        self.save_database().map_err(|e| e.to_string())
+                    } else {
+                        Err("Snippet not found".to_string())
+                    }
+                };
+
+                // Reset confirmation state
+                self.confirmation_state = ConfirmationState::None;
+
+                match result {
+                    Ok(_) => {
+                        self.set_success_message(
+                            if is_notebook {
+                                "Notebook moved successfully"
+                            } else {
+                                "Snippet moved successfully"
+                            }
+                            .to_string(),
+                        );
+                        self.refresh_tree_items();
+                        true
+                    }
+                    Err(e) => {
+                        self.set_error_message(e);
+                        false
+                    }
+                }
+            }
+            ConfirmationState::None => false,
+        }
+    }
+
+    /// Cancel the current pending action
+    pub fn cancel_pending_action(&mut self) {
+        self.confirmation_state = ConfirmationState::None;
+        self.clear_messages();
+    }
+
+    /// Check if there's a pending action that needs confirmation
+    pub fn has_pending_action(&self) -> bool {
+        !matches!(self.confirmation_state, ConfirmationState::None)
     }
 }
