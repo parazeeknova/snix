@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
+    text::{Line, Span},
     widgets::{Block, BorderType, List, ListItem, ListState, Paragraph, Widget},
 };
 
@@ -33,7 +34,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Layout::vertical([
             Constraint::Fill(1),
             Constraint::Length(2),
-            Constraint::Length(8),
+            Constraint::Length(12),
             Constraint::Length(3),
         ])
         .split(inner_area)
@@ -212,13 +213,13 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
     // Use the same width as the menu for visual consistency
     let snippets_area = Layout::horizontal([
         Constraint::Fill(1),
-        Constraint::Length(45),
+        Constraint::Length(60),
         Constraint::Fill(1),
     ])
     .split(area)[1];
 
     let block = Block::bordered()
-        .title(" ⏱ Recent Snippets ")
+        .title(" ⏱ Recent Snippets [1-5 to open] ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
@@ -229,7 +230,7 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
     // Get most recently accessed snippets
     let mut recent_snippets: Vec<_> = app.snippet_database.snippets.values().collect();
     recent_snippets.sort_by(|a, b| b.accessed_at.cmp(&a.accessed_at));
-    recent_snippets.truncate(3);
+    recent_snippets.truncate(10); // Show 5 snippets instead of 3
 
     if recent_snippets.is_empty() {
         let empty_text = Paragraph::new("No snippets accessed yet. Press 's' to create some!")
@@ -241,7 +242,8 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
 
     let items: Vec<ListItem> = recent_snippets
         .iter()
-        .map(|snippet| {
+        .enumerate()
+        .map(|(i, snippet)| {
             let icon = snippet.language.icon();
             let notebook_name = app
                 .snippet_database
@@ -250,7 +252,16 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
                 .map(|n| n.name.as_str())
                 .unwrap_or("Unknown");
 
+            let color_index = app.get_notebook_color(&snippet.notebook_id);
+            let colors = crate::ui::code_snippets::get_available_colors();
+            let notebook_color = colors
+                .get(color_index % colors.len())
+                .unwrap_or(&colors[0])
+                .1;
+
             let ago = format_time_ago(&snippet.accessed_at);
+            let lines = snippet.get_line_count();
+            let language = snippet.language.display_name();
 
             // Format the title to truncate if necessary
             let title = if snippet.title.len() > 20 {
@@ -259,9 +270,37 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
                 snippet.title.clone()
             };
 
-            let content = format!("{} {} • {} • {}", icon, title, notebook_name, ago);
+            // Create styled spans for the content
+            let shortcut = format!("[{}]", i + 1);
 
-            ListItem::new(content).style(Style::default().fg(RosePine::TEXT))
+            // Create a line with styled spans
+            let notebook_span = Span::styled(
+                format!("{}", notebook_name),
+                Style::default().fg(notebook_color),
+            );
+
+            let spans = vec![
+                Span::raw(format!("{} ", shortcut)),
+                Span::styled(format!("{} ", icon), Style::default().fg(RosePine::GOLD)),
+                Span::styled(title, Style::default().fg(RosePine::TEXT).bold()),
+                Span::raw(" • "),
+                notebook_span,
+                Span::raw(format!(" • {} • {} lines • {}", language, lines, ago)),
+            ];
+
+            ListItem::new(Line::from(spans)).style(
+                Style::default()
+                    .fg(if i == 0 {
+                        RosePine::LOVE
+                    } else {
+                        RosePine::TEXT
+                    })
+                    .bg(if i % 2 == 0 {
+                        RosePine::HIGHLIGHT_LOW
+                    } else {
+                        RosePine::BASE
+                    }),
+            )
         })
         .collect();
 

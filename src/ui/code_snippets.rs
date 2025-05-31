@@ -103,7 +103,7 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_main_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered()
-        .title("  Code Snippets Manager ")
+        .title(" 󱃖 Code Snippets Manager ")
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
@@ -530,7 +530,7 @@ fn render_color_selection_overlay(frame: &mut Frame, area: Rect, app: &mut App) 
     frame.render_stateful_widget(color_list, inner_list_area, &mut list_state);
 }
 
-fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
+pub fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
     vec![
         ("Default", RosePine::TEXT),
         ("Red", RosePine::LOVE),
@@ -631,9 +631,9 @@ fn create_tree_indent(depth: usize, is_last_item: bool) -> String {
     }
 
     if is_last_item {
-        indent.push_str("└──");
+        indent.push_str("└─ ");
     } else {
-        indent.push_str("├──");
+        indent.push_str("├─ ");
     }
 
     indent
@@ -641,7 +641,7 @@ fn create_tree_indent(depth: usize, is_last_item: bool) -> String {
 
 fn render_tree_view_with_colors(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered()
-        .title("  Notebooks & Snippets ")
+        .title("  Notebooks & Snippets ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
@@ -691,7 +691,7 @@ fn render_tree_view_with_colors(frame: &mut Frame, area: Rect, app: &mut App) {
                         .1;
 
                     let indent_str = create_tree_indent(*depth, false);
-                    let icon = "";
+                    let icon = "";
 
                     let spans = vec![
                         Span::styled(indent_str, Style::default().fg(notebook_color)),
@@ -780,7 +780,7 @@ fn render_preview_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     Clear.render(area, frame.buffer_mut());
 
     let block = Block::bordered()
-        .title("  Preview ")
+        .title("  Preview ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE).bg(RosePine::BASE));
 
@@ -1445,7 +1445,7 @@ fn render_search_view(frame: &mut Frame, area: Rect, _app: &mut App) {
     paragraph.render(area, frame.buffer_mut());
 }
 
-fn render_settings_view(frame: &mut Frame, area: Rect, app: &App) {
+fn render_settings_view(frame: &mut Frame, area: Rect, _app: &App) {
     let paragraph = Paragraph::new("Settings coming soon...")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::TEXT));

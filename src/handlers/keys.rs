@@ -1,5 +1,4 @@
 //! Keyboard Input Handling Module
-//!
 //! This module provides comprehensive keyboard input handling for the RustUI application.
 //! It processes all user keyboard interactions and translates them into appropriate
 //! application state changes, navigation actions, and menu interactions.
@@ -709,7 +708,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 }
 
 /// Handles keys for notebook view
-fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, notebook_id: uuid::Uuid) -> bool {
+fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::Uuid) -> bool {
     match key.code {
         KeyCode::Esc => {
             app.code_snippets_state = CodeSnippetsState::NotebookList;
@@ -721,7 +720,7 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, notebook_id: uuid::Uu
 }
 
 /// Handles keys for snippet editor
-fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, snippet_id: uuid::Uuid) -> bool {
+fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, _snippet_id: uuid::Uuid) -> bool {
     match key.code {
         KeyCode::Esc => {
             app.code_snippets_state = CodeSnippetsState::NotebookList;
@@ -892,7 +891,6 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
 }
 
 /// Handles keyboard input specifically for the start page (main menu)
-///
 /// This function processes all keyboard interactions when the user is on the main
 /// start page. It handles menu navigation (up/down movement), item selection,
 /// and provides convenient single-letter shortcuts for quick navigation to
@@ -985,13 +983,43 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
-        // Ignore all other key presses on the start page
+        // Numeric shortcuts for recent snippets (1-5)
+        KeyCode::Char('1')
+        | KeyCode::Char('2')
+        | KeyCode::Char('3')
+        | KeyCode::Char('4')
+        | KeyCode::Char('5') => {
+            let index = match key.code {
+                KeyCode::Char('1') => 0,
+                KeyCode::Char('2') => 1,
+                KeyCode::Char('3') => 2,
+                KeyCode::Char('4') => 3,
+                KeyCode::Char('5') => 4,
+                _ => unreachable!(),
+            };
+
+            let mut recent_snippets: Vec<_> = app.snippet_database.snippets.values().collect();
+            recent_snippets.sort_by(|a, b| b.accessed_at.cmp(&a.accessed_at));
+
+            if index < recent_snippets.len() {
+                let snippet = &recent_snippets[index];
+                let snippet_id = snippet.id;
+
+                app.navigate_to(AppState::CodeSnippets);
+                if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
+                    snippet.mark_accessed();
+                }
+                let _ = app.save_database();
+                launch_external_editor(app, snippet_id);
+            }
+
+            false
+        }
         _ => false,
     }
 }
 
 /// Handles keyboard input for all non-start pages (WIP dialogs and future pages)
-///
 /// This function processes keyboard interactions when the user is on any page other
 /// than the start page. Currently, all non-start pages show work-in-progress dialogs,
 /// so this handler primarily focuses on navigation commands to return to previous
