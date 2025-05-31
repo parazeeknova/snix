@@ -1,6 +1,7 @@
 use crate::app::{App, CodeSnippetsState, InputMode, TreeItem};
 use crate::ui::colors::RosePine;
 use crate::ui::components::render_bottom_bar;
+use once_cell::sync::Lazy;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -8,6 +9,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Widget, Wrap},
 };
+use syntect::{
+    easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet, util::LinesWithEndings,
+};
+
+static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| SyntaxSet::load_defaults_newlines());
+static THEME_SET: Lazy<ThemeSet> = Lazy::new(|| ThemeSet::load_defaults());
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let main_area = frame.area();
@@ -149,12 +156,11 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
 /// Render language selection overlay
 /// Renders a help menu overlay showing all available keyboard shortcuts
 fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
-    // Position the help menu in the bottom right corner
     let width = 60;
-    let height = 24;
+    let height = 28;
     let popup_area = Rect::new(
-        area.width.saturating_sub(width + 2), // 2 cells padding from right edge
-        area.height.saturating_sub(height + 2), // 2 cells padding from bottom edge
+        area.width.saturating_sub(width + 2),
+        area.height.saturating_sub(height + 2),
         width.min(area.width),
         height.min(area.height),
     );
@@ -232,6 +238,19 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
             Span::styled("  /   ", Style::default().fg(RosePine::GOLD)),
             Span::raw("Search snippets"),
         ]),
+        Line::from(vec![
+            Span::styled("  r   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Refresh tree view"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Features",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from("• Full syntax highlighting for 20+ languages"),
+        Line::from("• Copy to clipboard functionality"),
+        Line::from("• Snippet descriptions in tree view"),
         Line::from(""),
         Line::from(Span::styled(
             "General",
@@ -813,10 +832,10 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
 
     info_paragraph.render(chunks[0], frame.buffer_mut());
 
+    // Show content preview with syntax highlighting
     if !snippet.content.is_empty() {
         let preview_content = snippet.get_preview(0);
         let title = format!(" Content Preview ({}) ", snippet.language.display_name());
-
         let content_block = Block::bordered()
             .title(title)
             .border_type(BorderType::Rounded)
@@ -847,7 +866,6 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
                 }
 
                 let leading_spaces = line.chars().take_while(|c| c.is_whitespace()).count();
-
                 let mut cleaned = line.to_string();
 
                 while let Some(start) = cleaned.find('[') {
@@ -872,7 +890,7 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
             .collect::<Vec<_>>()
             .join("\n");
 
-        display_regular_content(frame, inner_content_area, &clean_content, snippet);
+        display_highlighted_content(frame, inner_content_area, &clean_content, snippet);
     } else {
         let empty_text = Paragraph::new("Empty snippet\nPress Enter to edit")
             .alignment(Alignment::Center)
@@ -881,81 +899,80 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
     }
 }
 
-fn display_regular_content(
+fn display_highlighted_content(
     frame: &mut Frame,
     area: Rect,
     content: &str,
     snippet: &crate::models::CodeSnippet,
 ) {
-    // Create a clean background for the content
     let bg_block = Block::default()
         .style(Style::default().bg(RosePine::SURFACE))
         .borders(ratatui::widgets::Borders::NONE);
     bg_block.render(area, frame.buffer_mut());
 
-    let styled_lines: Vec<Line> = content
-        .lines()
+    let syntax_name = match snippet.language {
+        crate::models::SnippetLanguage::Rust => "Rust",
+        crate::models::SnippetLanguage::JavaScript => "JavaScript",
+        crate::models::SnippetLanguage::TypeScript => "TypeScript",
+        crate::models::SnippetLanguage::Python => "Python",
+        crate::models::SnippetLanguage::Go => "Go",
+        crate::models::SnippetLanguage::Java => "Java",
+        crate::models::SnippetLanguage::C => "C",
+        crate::models::SnippetLanguage::Cpp => "C++",
+        crate::models::SnippetLanguage::CSharp => "C#",
+        crate::models::SnippetLanguage::PHP => "PHP",
+        crate::models::SnippetLanguage::Ruby => "Ruby",
+        crate::models::SnippetLanguage::HTML => "HTML",
+        crate::models::SnippetLanguage::CSS => "CSS",
+        crate::models::SnippetLanguage::SCSS => "SCSS",
+        crate::models::SnippetLanguage::SQL => "SQL",
+        crate::models::SnippetLanguage::Bash => "Bash",
+        crate::models::SnippetLanguage::PowerShell => "PowerShell",
+        crate::models::SnippetLanguage::Yaml => "YAML",
+        crate::models::SnippetLanguage::Json => "JSON",
+        crate::models::SnippetLanguage::Xml => "XML",
+        crate::models::SnippetLanguage::Markdown => "Markdown",
+        crate::models::SnippetLanguage::Toml => "TOML",
+        crate::models::SnippetLanguage::Ini => "INI",
+        _ => "Plain Text",
+    };
+
+    let syntax = SYNTAX_SET
+        .find_syntax_by_name(syntax_name)
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+
+    let theme = &THEME_SET.themes["base16-mocha.dark"];
+
+    let mut highlighter = HighlightLines::new(syntax, theme);
+
+    let styled_lines: Vec<Line> = LinesWithEndings::from(content)
         .map(|line| {
-            // Create styled spans for different code elements
-            let mut styled_spans = Vec::new();
+            let highlighted = highlighter
+                .highlight_line(line, &SYNTAX_SET)
+                .unwrap_or_default();
 
-            // Simple syntax highlighting based on language
-            match snippet.language {
-                crate::models::SnippetLanguage::Rust => {
-                    if line.contains(" fn ")
-                        || line.trim_start().starts_with("fn ")
-                        || line.contains(" use ")
-                        || line.trim_start().starts_with("use ")
-                        || line.contains(" struct ")
-                        || line.trim_start().starts_with("struct ")
-                        || line.contains(" enum ")
-                        || line.trim_start().starts_with("enum ")
-                        || line.contains(" impl ")
-                        || line.trim_start().starts_with("impl ")
-                        || line.contains(" pub ")
-                        || line.trim_start().starts_with("pub ")
-                    {
-                        styled_spans.push(Span::styled(line, Style::default().fg(RosePine::LOVE)));
-                    }
-                    // Variables and mutable keywords
-                    else if line.contains(" let ")
-                        || line.trim_start().starts_with("let ")
-                        || line.contains(" mut ")
-                        || line.contains("mut ")
-                    {
-                        styled_spans.push(Span::styled(line, Style::default().fg(RosePine::FOAM)));
-                    }
-                    // Strings and chars
-                    else if line.contains("\"") || line.contains("'") {
-                        styled_spans.push(Span::styled(line, Style::default().fg(RosePine::GOLD)));
-                    }
-                    // Function calls (often contain parentheses)
-                    else if line.contains("(") && line.contains(")") {
-                        styled_spans.push(Span::styled(line, Style::default().fg(RosePine::IRIS)));
-                    }
-                    // Comments
-                    else if line.trim_start().starts_with("//") {
-                        styled_spans.push(Span::styled(line, Style::default().fg(RosePine::MUTED)));
-                    }
-                    // Everything else
-                    else {
-                        styled_spans.push(Span::styled(line, Style::default().fg(RosePine::TEXT)));
-                    }
-                }
-                _ => {
-                    // Default styling for other languages
-                    styled_spans.push(Span::styled(line, Style::default().fg(RosePine::TEXT)));
-                }
-            }
+            let spans: Vec<Span> = highlighted
+                .iter()
+                .map(|(style, text)| {
+                    let fg_color = style.foreground;
 
-            Line::from(styled_spans)
+                    let ratatui_style = Style::default()
+                        .fg(ratatui::style::Color::Rgb(
+                            fg_color.r, fg_color.g, fg_color.b,
+                        ))
+                        .bg(RosePine::SURFACE);
+
+                    Span::styled(text.to_string(), ratatui_style)
+                })
+                .collect();
+
+            Line::from(spans)
         })
         .collect();
 
     let content_paragraph = Paragraph::new(styled_lines)
         .wrap(Wrap { trim: false })
-        .scroll((0, 0))
-        .style(Style::default().bg(RosePine::SURFACE));
+        .scroll((0, 0));
 
     content_paragraph.render(area, frame.buffer_mut());
 }
@@ -1069,9 +1086,9 @@ fn render_create_snippet_dialog(
 
                 let title = format!("Create Snippet in {}", notebook_name);
                 let chunks = Layout::horizontal([
-                    Constraint::Length(title.len() as u16 + 4), // Title section
-                    Constraint::Min(10),                        // Input section
-                    Constraint::Length(24),                     // Shortcuts section
+                    Constraint::Length(title.len() as u16 + 4),
+                    Constraint::Min(10),
+                    Constraint::Length(24),
                 ])
                 .split(inner_area);
 
@@ -1120,7 +1137,6 @@ fn render_settings_view(frame: &mut Frame, area: Rect, _app: &App) {
     paragraph.render(area, frame.buffer_mut());
 }
 
-/// Creates a spotlight-style bar at the top of the screen with some margin
 fn spotlight_bar(width_percent: u16, r: Rect) -> Rect {
     let layout = Layout::vertical([
         Constraint::Length(3),

@@ -1035,6 +1035,7 @@ dependencies = [
  "crossterm 0.29.0",
  "dirs",
  "figlet-rs",
+ "once_cell",
  "ratatui",
  "regex",
  "serde",
