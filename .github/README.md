@@ -18,11 +18,11 @@ Snix is a modern, fast, and intuitive terminal user interface for managing devel
 
 | Home with recents | Snippets | New Snippets |
 |:-:|:-:|:-:|
-| ![home](./assets/home.png) | ![snippets](./assets/notebook.png) | ![new_snippet](./assets/new_snippet.png)
+| ![home](./assets/home.png) | ![snippets](./assets/snippet.png) | ![search](./assets/search.png)
 
-| WIP Tab | New Notebook | Saved |
+| Notebook Details | Actions | blank snippet |
 |:-:|:-:|:-:|
-| ![wip](./assets/wip.png) | ![new_notebook](./assets/new_notebook.png) | ![saved](./assets/saved.png)
+| ![wip](./assets/notebook_details.png) | ![keybindings](./assets/keyboard_shortcut.png) | ![welcome](./assets/welcome.png)
 
 ### Current Status
 
