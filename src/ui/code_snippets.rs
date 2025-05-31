@@ -29,8 +29,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     match app.code_snippets_state {
         CodeSnippetsState::NotebookList => render_main_view(frame, main_area, app),
-        CodeSnippetsState::NotebookView { notebook_id } => {
+        CodeSnippetsState::_NotebookView { notebook_id } => {
             render_notebook_view(frame, main_area, app, notebook_id)
+        }
+        CodeSnippetsState::NotebookDetails { notebook_id } => {
+            crate::ui::notebook_details::render(frame, app, notebook_id)
         }
         CodeSnippetsState::_SnippetEditor { snippet_id } => {
             render_snippet_editor(frame, main_area, app, snippet_id)
@@ -160,7 +163,7 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
 /// Renders a help menu overlay showing all available keyboard shortcuts
 fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
     let width = 60;
-    let height = 32;
+    let height = 36; // Increased height to accommodate notebook details shortcuts
     let popup_area = Rect::new(
         area.width.saturating_sub(width + 2),
         area.height.saturating_sub(height + 2),
@@ -216,6 +219,14 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
             Span::raw("Create nested notebook inside selected notebook"),
         ]),
         Line::from(vec![
+            Span::styled("  v   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("View notebook details/stats"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+⏎ ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Open notebook details view"),
+        ]),
+        Line::from(vec![
             Span::styled("  x   ", Style::default().fg(RosePine::GOLD)),
             Span::raw("Delete notebook/snippet"),
         ]),
@@ -244,6 +255,38 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         Line::from(vec![
             Span::styled("  r   ", Style::default().fg(RosePine::GOLD)),
             Span::raw("Refresh tree view"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Notebook Details",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Tab  ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Next tab"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+Tab ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Previous tab"),
+        ]),
+        Line::from(vec![
+            Span::styled("  1-4  ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Switch to tab 1-4"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Notebook Details",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  s    ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Create snippet in current notebook"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc  ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Return to notebook list"),
         ]),
         Line::from(""),
         Line::from(Span::styled(
@@ -277,6 +320,7 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         Line::from("• Copy to clipboard functionality"),
         Line::from("• Snippet descriptions in tree view"),
         Line::from("• Content scrolling with scrollbar"),
+        Line::from("• Detailed notebook statistics and graphs"),
         Line::from(""),
         Line::from(Span::styled(
             "General",

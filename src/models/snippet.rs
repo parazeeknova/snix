@@ -23,7 +23,7 @@ pub struct CodeSnippet {
     pub syntax_theme: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SnippetLanguage {
     Rust,
     JavaScript,
@@ -203,6 +203,42 @@ impl SnippetLanguage {
             SnippetLanguage::Config => "",
             SnippetLanguage::Text => "",
             SnippetLanguage::Other(_) => "",
+        }
+    }
+
+    /// Get short name for the language
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            SnippetLanguage::Rust => "Rust",
+            SnippetLanguage::JavaScript => "JS",
+            SnippetLanguage::TypeScript => "TS",
+            SnippetLanguage::Python => "Py",
+            SnippetLanguage::Go => "Go",
+            SnippetLanguage::Java => "Java",
+            SnippetLanguage::C => "C",
+            SnippetLanguage::Cpp => "C++",
+            SnippetLanguage::CSharp => "C#",
+            SnippetLanguage::PHP => "PHP",
+            SnippetLanguage::Ruby => "Ruby",
+            SnippetLanguage::Swift => "Swift",
+            SnippetLanguage::Kotlin => "Kotlin",
+            SnippetLanguage::Dart => "Dart",
+            SnippetLanguage::HTML => "HTML",
+            SnippetLanguage::CSS => "CSS",
+            SnippetLanguage::SCSS => "SCSS",
+            SnippetLanguage::SQL => "SQL",
+            SnippetLanguage::Bash => "Bash",
+            SnippetLanguage::PowerShell => "PS",
+            SnippetLanguage::Yaml => "YAML",
+            SnippetLanguage::Json => "JSON",
+            SnippetLanguage::Xml => "XML",
+            SnippetLanguage::Markdown => "MD",
+            SnippetLanguage::Dockerfile => "Docker",
+            SnippetLanguage::Toml => "TOML",
+            SnippetLanguage::Ini => "INI",
+            SnippetLanguage::Config => "Conf",
+            SnippetLanguage::Text => "Text",
+            SnippetLanguage::Other(name) => Box::leak(name.clone().into_boxed_str()),
         }
     }
 }

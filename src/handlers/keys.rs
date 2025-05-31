@@ -294,8 +294,11 @@ fn get_available_languages() -> Vec<SnippetLanguage> {
 fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
     match app.code_snippets_state {
         CodeSnippetsState::NotebookList => handle_notebook_list_keys(key, app),
-        CodeSnippetsState::NotebookView { notebook_id } => {
+        CodeSnippetsState::_NotebookView { notebook_id } => {
             handle_notebook_view_keys(key, app, notebook_id)
+        }
+        CodeSnippetsState::NotebookDetails { notebook_id } => {
+            handle_notebook_details_keys(key, app, notebook_id)
         }
         CodeSnippetsState::_SnippetEditor { snippet_id } => {
             handle_snippet_editor_keys(key, app, snippet_id)
@@ -380,7 +383,10 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                 match selected_item {
                     TreeItem::Notebook(notebook_id, _) => {
                         app.current_notebook_id = Some(notebook_id);
-                        app.code_snippets_state = CodeSnippetsState::NotebookView { notebook_id };
+
+                        // Always go to the details view when selecting a notebook
+                        app.code_snippets_state =
+                            CodeSnippetsState::NotebookDetails { notebook_id };
                     }
                     TreeItem::Snippet(snippet_id, _) => {
                         if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
@@ -602,12 +608,25 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                     app.input_mode = InputMode::EditSnippetDescription;
                     app.current_notebook_id = Some(snippet.notebook_id);
                     app.input_buffer = snippet.description.clone().unwrap_or_default();
-                    app.pending_snippet_title = snippet.title.clone(); // Store snippet title for reference
+                    app.pending_snippet_title = snippet.title.clone();
                 } else {
                     app.set_error_message("Snippet not found".to_string());
                 }
             } else {
                 app.set_error_message("Select a snippet first".to_string());
+            }
+            false
+        }
+
+        // View notebook details with 'v' key
+        KeyCode::Char('v') | KeyCode::Char('V') => {
+            app.clear_messages();
+            if let Some(TreeItem::Notebook(notebook_id, _)) = app.get_selected_item().cloned() {
+                app.current_notebook_id = Some(notebook_id);
+                app.code_snippets_state = CodeSnippetsState::NotebookDetails { notebook_id };
+                app.selected_details_tab = 0; // Reset to overview tab
+            } else {
+                app.set_error_message("Select a notebook first".to_string());
             }
             false
         }
@@ -933,6 +952,38 @@ fn handle_other_page_keys(key: KeyEvent, app: &mut App) -> bool {
         }
 
         // Ignore all other key presses on non-start pages
+        _ => false,
+    }
+}
+
+/// Add a new handler for notebook details view
+fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid::Uuid) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.code_snippets_state = CodeSnippetsState::NotebookList;
+            app.current_notebook_id = None;
+            false
+        }
+
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            app.clear_messages();
+            app.input_mode = InputMode::CreateSnippet;
+            app.input_buffer.clear();
+            app.code_snippets_state = CodeSnippetsState::CreateSnippet { notebook_id };
+            false
+        }
+
+        KeyCode::PageUp => {
+            app.content_scroll_position = app.content_scroll_position.saturating_sub(5);
+            app.needs_redraw = true;
+            false
+        }
+        KeyCode::PageDown => {
+            app.content_scroll_position = app.content_scroll_position.saturating_add(5);
+            app.needs_redraw = true;
+            false
+        }
+
         _ => false,
     }
 }

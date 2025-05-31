@@ -35,7 +35,8 @@ impl Default for AppState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CodeSnippetsState {
     NotebookList,
-    NotebookView { notebook_id: Uuid },
+    _NotebookView { notebook_id: Uuid },
+    NotebookDetails { notebook_id: Uuid },
     _SnippetEditor { snippet_id: Uuid },
     _CreateNotebook,
     CreateSnippet { notebook_id: Uuid },
@@ -84,6 +85,7 @@ pub struct App {
     pub pending_snippet_title: String,
     pub needs_redraw: bool,
     pub content_scroll_position: usize,
+    pub selected_details_tab: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,6 +143,7 @@ impl App {
             pending_snippet_title: String::new(),
             needs_redraw: true,
             content_scroll_position: 0,
+            selected_details_tab: 0,
         };
 
         app.refresh_tree_items();
