@@ -178,13 +178,11 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 }
                 InputMode::CreateSnippet => {
                     if !input.is_empty() {
-                        // Check if user provided a file extension
                         let (title, language) = if input.contains('.') {
                             let parts: Vec<&str> = input.rsplitn(2, '.').collect();
                             let extension = parts[0].to_lowercase();
                             let title = parts[1].to_string();
 
-                            // Get language from extension
                             let language = match extension.as_str() {
                                 "rs" => SnippetLanguage::Rust,
                                 "js" => SnippetLanguage::JavaScript,
@@ -219,7 +217,6 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
 
                             (title, language)
                         } else {
-                            // No extension provided, use plain text
                             (input, SnippetLanguage::Text)
                         };
 
@@ -413,29 +410,32 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         }
     }
 
-    // Handle Shift + Up/Down for scrolling
-    if key.modifiers.contains(KeyModifiers::SHIFT) {
-        match key.code {
-            KeyCode::Up => {
-                app.content_scroll_position = app.content_scroll_position.saturating_sub(1);
-                // app.needs_redraw = true;
-                return false;
-            }
-            KeyCode::Down => {
-                app.content_scroll_position = app.content_scroll_position.saturating_add(1);
-                // app.needs_redraw = true;
-                return false;
-            }
-            _ => {}
-        }
-    }
-
     match key.code {
+        // Handle Shift + Up for moving notebook up in hierarchy
+        KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.clear_messages();
+            if app.move_notebook_up() {
+                app.needs_redraw = true;
+            }
+            false
+        }
+
+        // Handle Shift + Down for moving notebook down in hierarchy
+        KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.clear_messages();
+            if app.move_notebook_down() {
+                app.needs_redraw = true;
+            }
+            false
+        }
+
+        // Normal navigation
         KeyCode::Up | KeyCode::Char('k') => {
             app.previous_tree_item();
             app.reset_scroll_position();
             false
         }
+
         KeyCode::Down | KeyCode::Char('j') => {
             app.next_tree_item();
             app.reset_scroll_position();
@@ -445,12 +445,13 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         // Add Page Up and Page Down for scrolling content
         KeyCode::PageUp => {
             app.content_scroll_position = app.content_scroll_position.saturating_sub(5);
-            // app.needs_redraw = true;
+            app.needs_redraw = true;
             false
         }
+
         KeyCode::PageDown => {
             app.content_scroll_position = app.content_scroll_position.saturating_add(5);
-            // app.needs_redraw = true;
+            app.needs_redraw = true;
             false
         }
 
@@ -495,8 +496,6 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         KeyCode::Char('n') | KeyCode::Char('N') => {
             app.clear_messages();
             // Create a root notebook (no parent)
-            // Explicitly reset both current_notebook_id and hovered_tree_item to ensure
-            // we always create a root notebook regardless of hover state
             app.current_notebook_id = None;
             // Temporarily store the current hovered state
             let prev_hovered = app.hovered_tree_item;
@@ -535,6 +534,15 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                 app.input_buffer.clear();
             } else {
                 app.set_error_message("Select a notebook first".to_string());
+            }
+            false
+        }
+
+        // Toggle collapse/expand notebook with space key
+        KeyCode::Char(' ') => {
+            app.clear_messages();
+            if app.toggle_notebook_collapse() {
+                app.needs_redraw = true;
             }
             false
         }
@@ -743,14 +751,20 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
-        // Toggle collapse/expand notebook with space key
-        KeyCode::Char(' ') => {
+        // Move item to next sibling (Shift+Right)
+        KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
             app.clear_messages();
-            if app.toggle_notebook_collapse() {
-                // Successfully toggled
+            if app.move_item_to_next_sibling() {
                 app.needs_redraw = true;
-            } else {
-                app.set_error_message("Select a notebook to collapse/expand".to_string());
+            }
+            false
+        }
+
+        // Move item to previous sibling (Shift+Left)
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.clear_messages();
+            if app.move_item_to_prev_sibling() {
+                app.needs_redraw = true;
             }
             false
         }

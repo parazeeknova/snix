@@ -472,6 +472,14 @@ impl App {
         self.tree_items.get(self.selected_tree_item)
     }
 
+    pub fn get_hovered_item(&self) -> Option<&TreeItem> {
+        if let Some(hovered_index) = self.hovered_tree_item {
+            self.tree_items.get(hovered_index)
+        } else {
+            self.get_selected_item()
+        }
+    }
+
     pub fn save_database(&self) -> Result<(), String> {
         if let Some(ref storage) = self.storage_manager {
             storage
@@ -650,5 +658,786 @@ impl App {
 
     pub fn is_notebook_collapsed(&self, notebook_id: &Uuid) -> bool {
         self.collapsed_notebooks.contains(notebook_id)
+    }
+
+    // Methods to move notebooks in the hierarchy
+    pub fn move_notebook_up(&mut self) -> bool {
+        if let Some(TreeItem::Notebook(notebook_id, _)) = self.get_selected_item().cloned() {
+            if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id).cloned() {
+                // If already at root level, nothing to do
+                if notebook.parent_id.is_none() {
+                    self.set_error_message("Notebook is already at root level".to_string());
+                    return false;
+                }
+
+                // Get parent notebook
+                if let Some(parent_id) = notebook.parent_id {
+                    if let Some(parent) = self.snippet_database.notebooks.get(&parent_id).cloned() {
+                        // Get grandparent ID
+                        let grandparent_id = parent.parent_id;
+
+                        // Update notebook parent to grandparent (move up one level)
+                        if let Some(notebook_to_update) =
+                            self.snippet_database.notebooks.get_mut(&notebook_id)
+                        {
+                            notebook_to_update.parent_id = grandparent_id;
+                            notebook_to_update.updated_at = chrono::Utc::now();
+                        }
+
+                        // Remove this notebook from parent's children
+                        if let Some(parent_to_update) =
+                            self.snippet_database.notebooks.get_mut(&parent_id)
+                        {
+                            parent_to_update.children.retain(|id| *id != notebook_id);
+                            parent_to_update.updated_at = chrono::Utc::now();
+                        }
+
+                        // Add this notebook to grandparent's children if it exists
+                        if let Some(grandparent_id) = grandparent_id {
+                            if let Some(grandparent) =
+                                self.snippet_database.notebooks.get_mut(&grandparent_id)
+                            {
+                                grandparent.children.push(notebook_id);
+                                grandparent.updated_at = chrono::Utc::now();
+                            }
+                        } else {
+                            // No grandparent, add to root notebooks
+                            if !self.snippet_database.root_notebooks.contains(&notebook_id) {
+                                self.snippet_database.root_notebooks.push(notebook_id);
+                            }
+                        }
+
+                        // Save to make persistent
+                        let _ = self.save_database();
+
+                        // Update the tree view
+                        self.refresh_tree_items();
+                        self.needs_redraw = true;
+                        self.set_success_message("Notebook moved up one level".to_string());
+                        return true;
+                    }
+                }
+            }
+        } else if let Some(TreeItem::Snippet(snippet_id, _)) = self.get_selected_item().cloned() {
+            if let Some(snippet) = self.snippet_database.snippets.get(&snippet_id).cloned() {
+                let notebook_id = snippet.notebook_id;
+
+                // Get current notebook
+                if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id).cloned() {
+                    // If notebook is at root level, snippet can't move up
+                    if notebook.parent_id.is_none() {
+                        self.set_error_message("Snippet is already in a root notebook".to_string());
+                        return false;
+                    }
+
+                    // Get parent notebook ID
+                    if let Some(parent_id) = notebook.parent_id {
+                        // Move snippet to parent notebook
+                        if let Some(snippet_to_update) =
+                            self.snippet_database.snippets.get_mut(&snippet_id)
+                        {
+                            snippet_to_update.notebook_id = parent_id;
+                            snippet_to_update.updated_at = chrono::Utc::now();
+                        }
+
+                        // Save to make persistent
+                        let _ = self.save_database();
+
+                        // Update the tree view
+                        self.refresh_tree_items();
+                        self.needs_redraw = true;
+                        self.set_success_message("Snippet moved up one level".to_string());
+                        return true;
+                    }
+                }
+            }
+        }
+
+        self.set_error_message("Unable to move item up".to_string());
+        false
+    }
+
+    pub fn move_notebook_down(&mut self) -> bool {
+        if let Some(TreeItem::Notebook(notebook_id, _)) = self.get_selected_item().cloned() {
+            // To move down, we need to select a sibling or another notebook as the new parent
+            if let Some(hovered_item) = self.get_hovered_item().cloned() {
+                match hovered_item {
+                    TreeItem::Notebook(target_id, _) => {
+                        // Can't move to itself
+                        if target_id == notebook_id {
+                            self.set_error_message("Cannot move notebook into itself".to_string());
+                            return false;
+                        }
+
+                        // Check if target is a descendant of the notebook - can't move to own child
+                        if self.is_descendant_of(&target_id, &notebook_id) {
+                            self.set_error_message(
+                                "Cannot move notebook into its own descendant".to_string(),
+                            );
+                            return false;
+                        }
+
+                        // Get current notebook
+                        if let Some(notebook) =
+                            self.snippet_database.notebooks.get(&notebook_id).cloned()
+                        {
+                            // Remove from current parent's children list
+                            if let Some(parent_id) = notebook.parent_id {
+                                if let Some(parent) =
+                                    self.snippet_database.notebooks.get_mut(&parent_id)
+                                {
+                                    parent.children.retain(|id| *id != notebook_id);
+                                    parent.updated_at = chrono::Utc::now();
+                                }
+                            } else {
+                                // If it's a root notebook, remove from root list
+                                self.snippet_database
+                                    .root_notebooks
+                                    .retain(|id| *id != notebook_id);
+                            }
+
+                            // Update notebook's parent
+                            if let Some(notebook_to_update) =
+                                self.snippet_database.notebooks.get_mut(&notebook_id)
+                            {
+                                notebook_to_update.parent_id = Some(target_id);
+                                notebook_to_update.updated_at = chrono::Utc::now();
+                            }
+
+                            // Add to new parent's children list
+                            if let Some(new_parent) =
+                                self.snippet_database.notebooks.get_mut(&target_id)
+                            {
+                                if !new_parent.children.contains(&notebook_id) {
+                                    new_parent.children.push(notebook_id);
+                                    new_parent.updated_at = chrono::Utc::now();
+                                }
+                            }
+
+                            // Save to make persistent
+                            let _ = self.save_database();
+
+                            // Update the tree view
+                            self.refresh_tree_items();
+                            self.needs_redraw = true;
+                            self.set_success_message("Notebook moved down one level".to_string());
+                            return true;
+                        }
+                    }
+                    _ => {
+                        self.set_error_message("Hover over a notebook to move into it".to_string());
+                        return false;
+                    }
+                }
+            } else {
+                // If no item is hovered, try to find the first visible notebook in the tree
+                // that isn't the selected notebook or its parent
+                for (idx, item) in self.tree_items.iter().enumerate() {
+                    if let TreeItem::Notebook(target_id, _) = item {
+                        // Skip self
+                        if *target_id == notebook_id {
+                            continue;
+                        }
+
+                        // Can't move into descendants
+                        if self.is_descendant_of(target_id, &notebook_id) {
+                            continue;
+                        }
+
+                        // Set this as hovered and try again
+                        self.hovered_tree_item = Some(idx);
+                        return self.move_notebook_down();
+                    }
+                }
+
+                self.set_error_message("No suitable notebook found to move into".to_string());
+                return false;
+            }
+        } else if let Some(TreeItem::Snippet(snippet_id, _)) = self.get_selected_item().cloned() {
+            // First check if a notebook is hovered - this takes priority
+            if let Some(hovered_item) = self.get_hovered_item().cloned() {
+                match hovered_item {
+                    TreeItem::Notebook(target_id, _) => {
+                        // Verify we're not trying to move to the same notebook
+                        if let Some(snippet) = self.snippet_database.snippets.get(&snippet_id) {
+                            if snippet.notebook_id == target_id {
+                                self.set_error_message(
+                                    "Snippet is already in this notebook".to_string(),
+                                );
+                                return false;
+                            }
+
+                            // Store the current notebook for potential future reference
+                            let current_notebook_id = snippet.notebook_id;
+
+                            // Check for moving to a child of current notebook
+                            // This is specifically for returning a snippet to a nested folder it came from
+                            let is_nested_move = if let Some(target_notebook) =
+                                self.snippet_database.notebooks.get(&target_id)
+                            {
+                                // Is the target a descendant of the current notebook?
+                                if target_notebook.parent_id == Some(current_notebook_id) {
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            // Move snippet to this notebook
+                            if let Some(snippet_to_update) =
+                                self.snippet_database.snippets.get_mut(&snippet_id)
+                            {
+                                snippet_to_update.notebook_id = target_id;
+                                snippet_to_update.updated_at = chrono::Utc::now();
+
+                                // Save to make persistent
+                                let _ = self.save_database();
+
+                                // Update the tree view
+                                self.refresh_tree_items();
+                                self.needs_redraw = true;
+
+                                if is_nested_move {
+                                    self.set_success_message(
+                                        "Snippet moved back to nested notebook".to_string(),
+                                    );
+                                } else {
+                                    self.set_success_message(
+                                        "Snippet moved to selected notebook".to_string(),
+                                    );
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                    _ => {
+                        // Nothing to do - we'll fall back to checking for child notebooks
+                    }
+                }
+            }
+
+            // No notebook hovered - try to find child notebooks of the current notebook
+            if let Some(snippet) = self.snippet_database.snippets.get(&snippet_id) {
+                let current_notebook_id = snippet.notebook_id;
+
+                // Find child notebooks of the current notebook
+                if let Some(current_notebook) =
+                    self.snippet_database.notebooks.get(&current_notebook_id)
+                {
+                    // If current notebook has children, move to first child
+                    if !current_notebook.children.is_empty() {
+                        let first_child_id = current_notebook.children[0];
+
+                        // Move snippet to this child notebook
+                        if let Some(snippet_to_update) =
+                            self.snippet_database.snippets.get_mut(&snippet_id)
+                        {
+                            snippet_to_update.notebook_id = first_child_id;
+                            snippet_to_update.updated_at = chrono::Utc::now();
+
+                            // Save to make persistent
+                            let _ = self.save_database();
+
+                            // Set hovered state to show destination
+                            if let Some(index) = self.tree_items.iter().position(|item| {
+                                if let TreeItem::Notebook(id, _) = item {
+                                    *id == first_child_id
+                                } else {
+                                    false
+                                }
+                            }) {
+                                self.hovered_tree_item = Some(index);
+                            }
+
+                            // Update the tree view
+                            self.refresh_tree_items();
+                            self.needs_redraw = true;
+
+                            self.set_success_message("Snippet moved to child notebook".to_string());
+                            return true;
+                        }
+                    } else {
+                        // Try to find any other notebook to move to
+                        for (idx, item) in self.tree_items.iter().enumerate() {
+                            if let TreeItem::Notebook(target_id, _) = item {
+                                // Skip the current notebook
+                                if *target_id == current_notebook_id {
+                                    continue;
+                                }
+
+                                // Set this as hovered and try again
+                                self.hovered_tree_item = Some(idx);
+                                return self.move_notebook_down();
+                            }
+                        }
+
+                        self.set_error_message(
+                            "Current notebook has no child notebooks".to_string(),
+                        );
+                        return false;
+                    }
+                }
+            }
+        }
+
+        self.set_error_message("Unable to move item down".to_string());
+        false
+    }
+
+    // Helper to check if a notebook is a descendant of another
+    fn is_descendant_of(&self, potential_descendant: &Uuid, ancestor: &Uuid) -> bool {
+        if let Some(notebook) = self.snippet_database.notebooks.get(potential_descendant) {
+            if let Some(parent_id) = notebook.parent_id {
+                if parent_id == *ancestor {
+                    return true;
+                }
+                return self.is_descendant_of(&parent_id, ancestor);
+            }
+        }
+        false
+    }
+
+    // Move an item to the next sibling notebook (right)
+    pub fn move_item_to_next_sibling(&mut self) -> bool {
+        if let Some(TreeItem::Snippet(snippet_id, _)) = self.get_selected_item().cloned() {
+            // First, find the current parent notebook
+            if let Some(snippet) = self.snippet_database.snippets.get(&snippet_id).cloned() {
+                let current_parent_id = snippet.notebook_id;
+
+                // Find the parent of the parent (grandparent)
+                if let Some(parent) = self
+                    .snippet_database
+                    .notebooks
+                    .get(&current_parent_id)
+                    .cloned()
+                {
+                    if let Some(grandparent_id) = parent.parent_id {
+                        // Find the grandparent to get list of siblings
+                        if let Some(grandparent) =
+                            self.snippet_database.notebooks.get(&grandparent_id)
+                        {
+                            // Get siblings (children of grandparent)
+                            let siblings = &grandparent.children;
+
+                            // Find index of current parent in siblings
+                            if let Some(index) =
+                                siblings.iter().position(|id| *id == current_parent_id)
+                            {
+                                // Get next sibling (or wrap around to first)
+                                let next_index = (index + 1) % siblings.len();
+                                let next_sibling_id = siblings[next_index];
+
+                                // Move snippet to the next sibling
+                                if let Some(snippet_to_update) =
+                                    self.snippet_database.snippets.get_mut(&snippet_id)
+                                {
+                                    snippet_to_update.notebook_id = next_sibling_id;
+                                    snippet_to_update.updated_at = chrono::Utc::now();
+
+                                    // Save to make persistent
+                                    let _ = self.save_database();
+
+                                    // Update the tree view
+                                    self.refresh_tree_items();
+                                    self.needs_redraw = true;
+
+                                    // Set hovered state to show destination
+                                    if let Some(index) = self.tree_items.iter().position(|item| {
+                                        if let TreeItem::Notebook(id, _) = item {
+                                            *id == next_sibling_id
+                                        } else {
+                                            false
+                                        }
+                                    }) {
+                                        self.hovered_tree_item = Some(index);
+                                    }
+
+                                    self.set_success_message(format!(
+                                        "Moved snippet to next sibling notebook"
+                                    ));
+                                    return true;
+                                }
+                            }
+                        }
+                    } else {
+                        // Parent is a root notebook, find the next root notebook
+                        let root_notebooks = &self.snippet_database.root_notebooks;
+                        if !root_notebooks.is_empty() {
+                            if let Some(index) = root_notebooks
+                                .iter()
+                                .position(|id| *id == current_parent_id)
+                            {
+                                // Get next root notebook (or wrap around to first)
+                                let next_index = (index + 1) % root_notebooks.len();
+                                let next_root_id = root_notebooks[next_index];
+
+                                // Move snippet to the next root notebook
+                                if let Some(snippet_to_update) =
+                                    self.snippet_database.snippets.get_mut(&snippet_id)
+                                {
+                                    snippet_to_update.notebook_id = next_root_id;
+                                    snippet_to_update.updated_at = chrono::Utc::now();
+
+                                    // Save to make persistent
+                                    let _ = self.save_database();
+
+                                    // Update the tree view
+                                    self.refresh_tree_items();
+                                    self.needs_redraw = true;
+
+                                    // Set hovered state to show destination
+                                    if let Some(index) = self.tree_items.iter().position(|item| {
+                                        if let TreeItem::Notebook(id, _) = item {
+                                            *id == next_root_id
+                                        } else {
+                                            false
+                                        }
+                                    }) {
+                                        self.hovered_tree_item = Some(index);
+                                    }
+
+                                    self.set_success_message(format!(
+                                        "Moved snippet to next root notebook"
+                                    ));
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            self.set_error_message(
+                "Cannot find a suitable sibling notebook to move to".to_string(),
+            );
+            return false;
+        } else if let Some(TreeItem::Notebook(notebook_id, _)) = self.get_selected_item().cloned() {
+            // Similar logic for notebooks
+            if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id).cloned() {
+                if let Some(parent_id) = notebook.parent_id {
+                    // Find the parent to get list of siblings
+                    if let Some(parent) = self.snippet_database.notebooks.get(&parent_id) {
+                        // Get siblings (children of parent)
+                        let siblings = &parent.children;
+
+                        // Find index of current notebook in siblings
+                        if let Some(index) = siblings.iter().position(|id| *id == notebook_id) {
+                            // Get next sibling (or wrap around to first)
+                            let next_index = (index + 1) % siblings.len();
+                            let next_sibling_id = siblings[next_index];
+
+                            // Check that we're not trying to move to self
+                            if next_sibling_id == notebook_id {
+                                self.set_error_message("No other siblings available".to_string());
+                                return false;
+                            }
+
+                            // Move this notebook after the next sibling in the parent's children array
+                            if let Some(parent_update) =
+                                self.snippet_database.notebooks.get_mut(&parent_id)
+                            {
+                                parent_update.children.retain(|id| *id != notebook_id);
+
+                                // Find the new index of the sibling (after removal)
+                                if let Some(new_pos) = parent_update
+                                    .children
+                                    .iter()
+                                    .position(|id| *id == next_sibling_id)
+                                {
+                                    parent_update.children.insert(new_pos + 1, notebook_id);
+                                } else {
+                                    parent_update.children.push(notebook_id);
+                                }
+
+                                parent_update.updated_at = chrono::Utc::now();
+
+                                // Save to make persistent
+                                let _ = self.save_database();
+
+                                // Update the tree view
+                                self.refresh_tree_items();
+                                self.needs_redraw = true;
+
+                                self.set_success_message(format!(
+                                    "Moved notebook to next position"
+                                ));
+                                return true;
+                            }
+                        }
+                    }
+                } else {
+                    // This is a root notebook, move to next position in root list
+                    let root_notebooks = &self.snippet_database.root_notebooks;
+                    if !root_notebooks.is_empty() {
+                        if let Some(index) = root_notebooks.iter().position(|id| *id == notebook_id)
+                        {
+                            // Get next root position (or wrap around)
+                            let next_index = (index + 1) % root_notebooks.len();
+
+                            // Check if there's only one root notebook
+                            if next_index == index {
+                                self.set_error_message(
+                                    "No other root notebooks available".to_string(),
+                                );
+                                return false;
+                            }
+
+                            // Move this notebook in the root notebooks array
+                            let mut new_roots = self.snippet_database.root_notebooks.clone();
+                            new_roots.remove(index);
+                            new_roots.insert(next_index, notebook_id);
+                            self.snippet_database.root_notebooks = new_roots;
+
+                            // Save to make persistent
+                            let _ = self.save_database();
+
+                            // Update the tree view
+                            self.refresh_tree_items();
+                            self.needs_redraw = true;
+
+                            self.set_success_message(format!(
+                                "Moved notebook to next root position"
+                            ));
+                            return true;
+                        }
+                    }
+                }
+            }
+            self.set_error_message("Cannot find a suitable position to move to".to_string());
+            return false;
+        }
+
+        self.set_error_message("Select a notebook or snippet to move".to_string());
+        false
+    }
+
+    // Move an item to the previous sibling notebook (left)
+    pub fn move_item_to_prev_sibling(&mut self) -> bool {
+        if let Some(TreeItem::Snippet(snippet_id, _)) = self.get_selected_item().cloned() {
+            // First, find the current parent notebook
+            if let Some(snippet) = self.snippet_database.snippets.get(&snippet_id).cloned() {
+                let current_parent_id = snippet.notebook_id;
+
+                // Find the parent of the parent (grandparent)
+                if let Some(parent) = self
+                    .snippet_database
+                    .notebooks
+                    .get(&current_parent_id)
+                    .cloned()
+                {
+                    if let Some(grandparent_id) = parent.parent_id {
+                        // Find the grandparent to get list of siblings
+                        if let Some(grandparent) =
+                            self.snippet_database.notebooks.get(&grandparent_id)
+                        {
+                            // Get siblings (children of grandparent)
+                            let siblings = &grandparent.children;
+
+                            // Find index of current parent in siblings
+                            if let Some(index) =
+                                siblings.iter().position(|id| *id == current_parent_id)
+                            {
+                                // Get previous sibling (or wrap around to last)
+                                let prev_index = if index == 0 {
+                                    siblings.len() - 1
+                                } else {
+                                    index - 1
+                                };
+                                let prev_sibling_id = siblings[prev_index];
+
+                                // Move snippet to the previous sibling
+                                if let Some(snippet_to_update) =
+                                    self.snippet_database.snippets.get_mut(&snippet_id)
+                                {
+                                    snippet_to_update.notebook_id = prev_sibling_id;
+                                    snippet_to_update.updated_at = chrono::Utc::now();
+
+                                    // Save to make persistent
+                                    let _ = self.save_database();
+
+                                    // Update the tree view
+                                    self.refresh_tree_items();
+                                    self.needs_redraw = true;
+
+                                    // Set hovered state to show destination
+                                    if let Some(index) = self.tree_items.iter().position(|item| {
+                                        if let TreeItem::Notebook(id, _) = item {
+                                            *id == prev_sibling_id
+                                        } else {
+                                            false
+                                        }
+                                    }) {
+                                        self.hovered_tree_item = Some(index);
+                                    }
+
+                                    self.set_success_message(format!(
+                                        "Moved snippet to previous sibling notebook"
+                                    ));
+                                    return true;
+                                }
+                            }
+                        }
+                    } else {
+                        // Parent is a root notebook, find the previous root notebook
+                        let root_notebooks = &self.snippet_database.root_notebooks;
+                        if !root_notebooks.is_empty() {
+                            if let Some(index) = root_notebooks
+                                .iter()
+                                .position(|id| *id == current_parent_id)
+                            {
+                                // Get previous root notebook (or wrap around to last)
+                                let prev_index = if index == 0 {
+                                    root_notebooks.len() - 1
+                                } else {
+                                    index - 1
+                                };
+                                let prev_root_id = root_notebooks[prev_index];
+
+                                // Move snippet to the previous root notebook
+                                if let Some(snippet_to_update) =
+                                    self.snippet_database.snippets.get_mut(&snippet_id)
+                                {
+                                    snippet_to_update.notebook_id = prev_root_id;
+                                    snippet_to_update.updated_at = chrono::Utc::now();
+
+                                    // Save to make persistent
+                                    let _ = self.save_database();
+
+                                    // Update the tree view
+                                    self.refresh_tree_items();
+                                    self.needs_redraw = true;
+
+                                    // Set hovered state to show destination
+                                    if let Some(index) = self.tree_items.iter().position(|item| {
+                                        if let TreeItem::Notebook(id, _) = item {
+                                            *id == prev_root_id
+                                        } else {
+                                            false
+                                        }
+                                    }) {
+                                        self.hovered_tree_item = Some(index);
+                                    }
+
+                                    self.set_success_message(format!(
+                                        "Moved snippet to previous root notebook"
+                                    ));
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            self.set_error_message(
+                "Cannot find a suitable sibling notebook to move to".to_string(),
+            );
+            return false;
+        } else if let Some(TreeItem::Notebook(notebook_id, _)) = self.get_selected_item().cloned() {
+            // Similar logic for notebooks
+            if let Some(notebook) = self.snippet_database.notebooks.get(&notebook_id).cloned() {
+                if let Some(parent_id) = notebook.parent_id {
+                    // Find the parent to get list of siblings
+                    if let Some(parent) = self.snippet_database.notebooks.get(&parent_id) {
+                        // Get siblings (children of parent)
+                        let siblings = &parent.children;
+
+                        // Find index of current notebook in siblings
+                        if let Some(index) = siblings.iter().position(|id| *id == notebook_id) {
+                            // Get previous sibling (or wrap around to last)
+                            let prev_index = if index == 0 {
+                                siblings.len() - 1
+                            } else {
+                                index - 1
+                            };
+                            let prev_sibling_id = siblings[prev_index];
+
+                            // Check that we're not trying to move to self
+                            if prev_sibling_id == notebook_id {
+                                self.set_error_message("No other siblings available".to_string());
+                                return false;
+                            }
+
+                            // Move this notebook before the previous sibling in the parent's children array
+                            if let Some(parent_update) =
+                                self.snippet_database.notebooks.get_mut(&parent_id)
+                            {
+                                parent_update.children.retain(|id| *id != notebook_id);
+
+                                // Find the new index of the sibling (after removal)
+                                if let Some(new_pos) = parent_update
+                                    .children
+                                    .iter()
+                                    .position(|id| *id == prev_sibling_id)
+                                {
+                                    parent_update.children.insert(new_pos, notebook_id);
+                                } else {
+                                    parent_update.children.insert(0, notebook_id);
+                                }
+
+                                parent_update.updated_at = chrono::Utc::now();
+
+                                // Save to make persistent
+                                let _ = self.save_database();
+
+                                // Update the tree view
+                                self.refresh_tree_items();
+                                self.needs_redraw = true;
+
+                                self.set_success_message(format!(
+                                    "Moved notebook to previous position"
+                                ));
+                                return true;
+                            }
+                        }
+                    }
+                } else {
+                    // This is a root notebook, move to previous position in root list
+                    let root_notebooks = &self.snippet_database.root_notebooks;
+                    if !root_notebooks.is_empty() {
+                        if let Some(index) = root_notebooks.iter().position(|id| *id == notebook_id)
+                        {
+                            // Get previous root position (or wrap around)
+                            let prev_index = if index == 0 {
+                                root_notebooks.len() - 1
+                            } else {
+                                index - 1
+                            };
+
+                            // Check if there's only one root notebook
+                            if prev_index == index {
+                                self.set_error_message(
+                                    "No other root notebooks available".to_string(),
+                                );
+                                return false;
+                            }
+
+                            // Move this notebook in the root notebooks array
+                            let mut new_roots = self.snippet_database.root_notebooks.clone();
+                            new_roots.remove(index);
+                            new_roots.insert(prev_index, notebook_id);
+                            self.snippet_database.root_notebooks = new_roots;
+
+                            // Save to make persistent
+                            let _ = self.save_database();
+
+                            // Update the tree view
+                            self.refresh_tree_items();
+                            self.needs_redraw = true;
+
+                            self.set_success_message(format!(
+                                "Moved notebook to previous root position"
+                            ));
+                            return true;
+                        }
+                    }
+                }
+            }
+            self.set_error_message("Cannot find a suitable position to move to".to_string());
+            return false;
+        }
+
+        self.set_error_message("Select a notebook or snippet to move".to_string());
+        false
     }
 }

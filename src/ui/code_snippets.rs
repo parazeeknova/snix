@@ -167,7 +167,7 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
 /// Renders a help menu overlay showing all available keyboard shortcuts
 fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
     let width = 60;
-    let height = 36; // Increased height to accommodate notebook details shortcuts
+    let height = 36;
     let popup_area = Rect::new(
         area.width.saturating_sub(width + 2),
         area.height.saturating_sub(height + 2),
@@ -225,6 +225,22 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         Line::from(vec![
             Span::styled("  Space", Style::default().fg(RosePine::GOLD)),
             Span::raw("Collapse/expand notebook"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+↑", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move notebook/snippet up one level in hierarchy (to parent)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+↓", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move notebook/snippet down one level (to child or nested folder)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+→", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move to next sibling notebook (horizontal movement)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+←", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move to previous sibling notebook (horizontal movement)"),
         ]),
         Line::from(vec![
             Span::styled("  v   ", Style::default().fg(RosePine::GOLD)),
@@ -770,6 +786,8 @@ fn render_tree_view_with_colors(frame: &mut Frame, area: Rect, app: &mut App) {
                             display_name,
                             if i == app.selected_tree_item {
                                 Style::default().fg(RosePine::LOVE).bold()
+                            } else if Some(i) == app.hovered_tree_item {
+                                Style::default().fg(notebook_color).bold().underlined()
                             } else {
                                 Style::default().fg(notebook_color)
                             },
@@ -814,6 +832,8 @@ fn render_tree_view_with_colors(frame: &mut Frame, area: Rect, app: &mut App) {
                             title_text,
                             if i == app.selected_tree_item {
                                 Style::default().fg(RosePine::GOLD).bold()
+                            } else if Some(i) == app.hovered_tree_item {
+                                Style::default().fg(RosePine::GOLD).underlined()
                             } else {
                                 Style::default().fg(RosePine::SUBTLE)
                             },

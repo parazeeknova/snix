@@ -105,9 +105,18 @@ fn get_context_shortcuts(app: &mut App) -> String {
                     "[Space] Fold"
                 };
 
+                // Add move hints based on selected item
+                let move_hint = if let Some(TreeItem::Notebook(_, _)) = app.get_selected_item() {
+                    "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
+                } else if let Some(TreeItem::Snippet(_, _)) = app.get_selected_item() {
+                    "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
+                } else {
+                    ""
+                };
+
                 format!(
-                    "{} [n] Root │ [b] Nested │ {} │ [?] Help",
-                    back_hint, collapse_text
+                    "{} [n] Root │ [b] Nested │ {} │ {} │ [?] Help",
+                    back_hint, collapse_text, move_hint
                 )
             }
         }
