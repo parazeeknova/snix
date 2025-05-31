@@ -7,7 +7,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Widget, Wrap},
+    widgets::{
+        Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Widget, Wrap,
+    },
 };
 use syntect::{
     easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet, util::LinesWithEndings,
@@ -157,7 +160,7 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
 /// Renders a help menu overlay showing all available keyboard shortcuts
 fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
     let width = 60;
-    let height = 28;
+    let height = 32;
     let popup_area = Rect::new(
         area.width.saturating_sub(width + 2),
         area.height.saturating_sub(height + 2),
@@ -244,6 +247,28 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
+            "Content Navigation",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Shift+↑ ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Scroll content up one line"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+↓ ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Scroll content down one line"),
+        ]),
+        Line::from(vec![
+            Span::styled("  PgUp ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Scroll content up (5 lines)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  PgDn ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Scroll content down (5 lines)"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
             "Features",
             Style::default().fg(RosePine::LOVE).bold(),
         )),
@@ -251,6 +276,7 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         Line::from("• Full syntax highlighting for 20+ languages"),
         Line::from("• Copy to clipboard functionality"),
         Line::from("• Snippet descriptions in tree view"),
+        Line::from("• Content scrolling with scrollbar"),
         Line::from(""),
         Line::from(Span::styled(
             "General",
@@ -592,7 +618,7 @@ fn render_preview_panel(frame: &mut Frame, area: Rect, app: &mut App) {
             }
             TreeItem::Snippet(id, _) => {
                 if let Some(snippet) = app.snippet_database.snippets.get(id) {
-                    render_snippet_preview(frame, inner_area, snippet);
+                    render_snippet_preview(frame, inner_area, snippet, app);
                 }
             }
         }
@@ -767,8 +793,12 @@ fn render_notebook_preview(
     }
 }
 
-fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models::CodeSnippet) {
-    // Set background for the entire preview area
+fn render_snippet_preview(
+    frame: &mut Frame,
+    area: Rect,
+    snippet: &crate::models::CodeSnippet,
+    app: &App,
+) {
     let bg_block = Block::default()
         .style(Style::default().bg(RosePine::SURFACE))
         .borders(ratatui::widgets::Borders::NONE);
@@ -890,7 +920,7 @@ fn render_snippet_preview(frame: &mut Frame, area: Rect, snippet: &crate::models
             .collect::<Vec<_>>()
             .join("\n");
 
-        display_highlighted_content(frame, inner_content_area, &clean_content, snippet);
+        display_highlighted_content(frame, inner_content_area, &clean_content, snippet, app);
     } else {
         let empty_text = Paragraph::new("Empty snippet\nPress Enter to edit")
             .alignment(Alignment::Center)
@@ -904,6 +934,7 @@ fn display_highlighted_content(
     area: Rect,
     content: &str,
     snippet: &crate::models::CodeSnippet,
+    app: &App,
 ) {
     let bg_block = Block::default()
         .style(Style::default().bg(RosePine::SURFACE))
@@ -943,9 +974,43 @@ fn display_highlighted_content(
 
     let theme = &THEME_SET.themes["base16-mocha.dark"];
 
+    // Count the total number of lines for scrollbar position calculation
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+
+    // Create visible area calculation
+    let visible_lines = area.height as usize;
+
+    // Ensure scroll position doesn't go beyond the content bounds
+    let max_scroll = total_lines.saturating_sub(visible_lines);
+    let scroll_position = app.content_scroll_position.min(max_scroll);
+
+    // Split the area to make room for scrollbar
+    let content_area = Rect {
+        width: area.width.saturating_sub(1),
+        ..area
+    };
+
+    let scrollbar_area = Rect {
+        x: area.x + area.width.saturating_sub(1),
+        y: area.y,
+        width: 1,
+        height: area.height,
+    };
+
     let mut highlighter = HighlightLines::new(syntax, theme);
 
-    let styled_lines: Vec<Line> = LinesWithEndings::from(content)
+    let visible_start = scroll_position;
+    let visible_end = (scroll_position + visible_lines).min(total_lines);
+
+    let visible_content = if visible_start < total_lines {
+        lines[visible_start..visible_end].join("\n")
+    } else {
+        String::new()
+    };
+
+    // Highlight only the visible content
+    let styled_lines: Vec<Line> = LinesWithEndings::from(visible_content.as_str())
         .map(|line| {
             let highlighted = highlighter
                 .highlight_line(line, &SYNTAX_SET)
@@ -970,11 +1035,23 @@ fn display_highlighted_content(
         })
         .collect();
 
-    let content_paragraph = Paragraph::new(styled_lines)
-        .wrap(Wrap { trim: false })
-        .scroll((0, 0));
+    let content_paragraph = Paragraph::new(styled_lines).wrap(Wrap { trim: false });
+    // No need for scroll if we're already selecting the visible window
+    // .scroll((0, 0));
 
-    content_paragraph.render(area, frame.buffer_mut());
+    content_paragraph.render(content_area, frame.buffer_mut());
+
+    if total_lines > visible_lines {
+        let mut scrollbar_state = ScrollbarState::default()
+            .content_length(total_lines)
+            .position(scroll_position);
+
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(RosePine::SUBTLE))
+            .thumb_style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
+
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
 }
 
 fn render_input_overlay(frame: &mut Frame, area: Rect, app: &mut App) {

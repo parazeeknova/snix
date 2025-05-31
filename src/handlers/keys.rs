@@ -328,19 +328,49 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         }
     }
 
+    // Handle Shift + Up/Down for scrolling
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        match key.code {
+            KeyCode::Up => {
+                app.content_scroll_position = app.content_scroll_position.saturating_sub(1);
+                // app.needs_redraw = true;
+                return false;
+            }
+            KeyCode::Down => {
+                app.content_scroll_position = app.content_scroll_position.saturating_add(1);
+                // app.needs_redraw = true;
+                return false;
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             app.previous_tree_item();
+            app.reset_scroll_position();
             false
         }
         KeyCode::Down | KeyCode::Char('j') => {
             app.next_tree_item();
+            app.reset_scroll_position();
+            false
+        }
+
+        // Add Page Up and Page Down for scrolling content
+        KeyCode::PageUp => {
+            app.content_scroll_position = app.content_scroll_position.saturating_sub(5);
+            // app.needs_redraw = true;
+            false
+        }
+        KeyCode::PageDown => {
+            app.content_scroll_position = app.content_scroll_position.saturating_add(5);
+            // app.needs_redraw = true;
             false
         }
 
         // Enter selected item (notebook or snippet)
         KeyCode::Enter => {
-            // If there's a message showing, Enter should just dismiss it
             if app.error_message.is_some() || app.success_message.is_some() {
                 app.clear_messages();
                 return false;

@@ -83,6 +83,7 @@ pub struct App {
     pub selected_language: usize,
     pub pending_snippet_title: String,
     pub needs_redraw: bool,
+    pub content_scroll_position: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +140,7 @@ impl App {
             selected_language: 0,
             pending_snippet_title: String::new(),
             needs_redraw: true,
+            content_scroll_position: 0,
         };
 
         app.refresh_tree_items();
@@ -526,5 +528,10 @@ impl App {
         } else {
             Err("Snippet not found".to_string())
         }
+    }
+
+    pub fn reset_scroll_position(&mut self) {
+        self.content_scroll_position = 0;
+        self.needs_redraw = true;
     }
 }
