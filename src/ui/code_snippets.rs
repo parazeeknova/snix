@@ -220,11 +220,15 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled("  b   ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("Create nested notebook inside selected notebook"),
+            Span::raw("Create nested notebook (when notebook selected)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Space", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Collapse/expand notebook"),
         ]),
         Line::from(vec![
             Span::styled("  v   ", Style::default().fg(RosePine::GOLD)),
-            Span::raw("View notebook details/stats"),
+            Span::raw("View notebook details"),
         ]),
         Line::from(vec![
             Span::styled("  Shift+⏎ ", Style::default().fg(RosePine::GOLD)),
@@ -691,13 +695,79 @@ fn render_tree_view_with_colors(frame: &mut Frame, area: Rect, app: &mut App) {
                         .1;
 
                     let indent_str = create_tree_indent(*depth, false);
-                    let icon = "";
+                    let icon = if app.is_notebook_collapsed(id) {
+                        "󱚂"
+                    } else {
+                        "󱙾"
+                    };
+
+                    // Create a preview of children for collapsed notebooks
+                    let display_name = if app.is_notebook_collapsed(id)
+                        && (!notebook.children.is_empty() || notebook.snippet_count > 0)
+                    {
+                        // When collapsed, show a preview of children
+                        let mut preview = format!("{} ({})", notebook.name, notebook.snippet_count);
+                        if !notebook.children.is_empty() {
+                            let mut child_names = Vec::new();
+                            for child_id in &notebook.children {
+                                if let Some(child) = app.snippet_database.notebooks.get(child_id) {
+                                    child_names.push(child.name.clone());
+                                }
+                            }
+
+                            // Collect snippet names if there are any directly in this notebook
+                            let snippet_names: Vec<_> = app
+                                .snippet_database
+                                .snippets
+                                .values()
+                                .filter(|s| s.notebook_id == *id)
+                                .map(|s| s.title.clone())
+                                .collect();
+                            child_names.extend(snippet_names);
+                            if !child_names.is_empty() {
+                                let preview_text = if child_names.len() <= 2 {
+                                    child_names.join(", ")
+                                } else {
+                                    format!("{}, {}, ...", child_names[0], child_names[1])
+                                };
+
+                                preview = format!("{} - [{}]", preview, preview_text);
+                            }
+                        }
+
+                        preview
+                    } else {
+                        // When expanded, show the notebook's description if available
+                        let mut display = format!("{} ({})", notebook.name, notebook.snippet_count);
+                        if let Some(desc) = &notebook.description {
+                            let desc_without_color = if desc.starts_with("[COLOR:") {
+                                if let Some(end_idx) = desc.find(']') {
+                                    let clean_desc = desc[end_idx + 1..].trim();
+                                    if !clean_desc.is_empty() {
+                                        format!(" - {}", clean_desc)
+                                    } else {
+                                        String::new()
+                                    }
+                                } else {
+                                    format!(" - {}", desc)
+                                }
+                            } else if !desc.is_empty() {
+                                format!(" - {}", desc)
+                            } else {
+                                String::new()
+                            };
+
+                            display.push_str(&desc_without_color);
+                        }
+
+                        display
+                    };
 
                     let spans = vec![
                         Span::styled(indent_str, Style::default().fg(notebook_color)),
                         Span::styled(format!("{} ", icon), Style::default().fg(notebook_color)),
                         Span::styled(
-                            format!("{} ({})", notebook.name, notebook.snippet_count),
+                            display_name,
                             if i == app.selected_tree_item {
                                 Style::default().fg(RosePine::LOVE).bold()
                             } else {

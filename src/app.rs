@@ -88,6 +88,7 @@ pub struct App {
     pub selected_details_tab: usize,
     #[allow(dead_code)]
     pub notebook_color: Option<Uuid>,
+    pub collapsed_notebooks: std::collections::HashSet<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +150,7 @@ impl App {
             content_scroll_position: 0,
             selected_details_tab: 0,
             notebook_color: None,
+            collapsed_notebooks: std::collections::HashSet::new(),
         };
 
         app.refresh_tree_items();
@@ -242,6 +244,11 @@ impl App {
 
     fn add_notebook_to_tree(&mut self, notebook_id: Uuid, depth: usize) {
         self.tree_items.push(TreeItem::Notebook(notebook_id, depth));
+
+        // Skip children if this notebook is collapsed
+        if self.collapsed_notebooks.contains(&notebook_id) {
+            return;
+        }
 
         let snippets: Vec<_> = self
             .snippet_database
@@ -613,5 +620,35 @@ impl App {
             }
         }
         0 // Default color index
+    }
+
+    pub fn toggle_notebook_collapse(&mut self) -> bool {
+        if let Some(TreeItem::Notebook(notebook_id, _)) = self.get_selected_item() {
+            let id = *notebook_id;
+            if self.collapsed_notebooks.contains(&id) {
+                self.expand_notebook(id);
+            } else {
+                self.collapse_notebook(id);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn collapse_notebook(&mut self, notebook_id: Uuid) {
+        self.collapsed_notebooks.insert(notebook_id);
+        self.refresh_tree_items();
+        self.needs_redraw = true;
+    }
+
+    pub fn expand_notebook(&mut self, notebook_id: Uuid) {
+        self.collapsed_notebooks.remove(&notebook_id);
+        self.refresh_tree_items();
+        self.needs_redraw = true;
+    }
+
+    pub fn is_notebook_collapsed(&self, notebook_id: &Uuid) -> bool {
+        self.collapsed_notebooks.contains(notebook_id)
     }
 }

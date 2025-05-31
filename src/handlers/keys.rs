@@ -743,6 +743,18 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
+        // Toggle collapse/expand notebook with space key
+        KeyCode::Char(' ') => {
+            app.clear_messages();
+            if app.toggle_notebook_collapse() {
+                // Successfully toggled
+                app.needs_redraw = true;
+            } else {
+                app.set_error_message("Select a notebook to collapse/expand".to_string());
+            }
+            false
+        }
+
         _ => false,
     }
 }

@@ -85,9 +85,29 @@ fn get_context_shortcuts(app: &mut App) -> String {
             if app.snippet_database.notebooks.is_empty() {
                 format!("{} [n] New Notebook │ [h] Home │ [q] Quit ", back_hint)
             } else {
+                // Check if a notebook is selected and can be collapsed/expanded
+                let collapse_text = if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item()
+                {
+                    if app.is_notebook_collapsed(id) {
+                        "[Space] Expand"
+                    } else if app
+                        .snippet_database
+                        .notebooks
+                        .get(id)
+                        .map(|nb| !nb.children.is_empty() || nb.snippet_count > 0)
+                        .unwrap_or(false)
+                    {
+                        "[Space] Collapse"
+                    } else {
+                        "[Space] Fold"
+                    }
+                } else {
+                    "[Space] Fold"
+                };
+
                 format!(
-                    "{} [n] Root Notebook │ [b] Nested Notebook │ [s] Snippet │ [?] Help",
-                    back_hint
+                    "{} [n] Root │ [b] Nested │ {} │ [?] Help",
+                    back_hint, collapse_text
                 )
             }
         }
@@ -171,13 +191,35 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                                     " ❯ ",
                                     Style::default().fg(RosePine::MUTED),
                                 ));
+
+                                // Add collapse/expand indicator if this is the selected notebook
+                                let notebook_name = if *id == *notebook_id {
+                                    let collapse_indicator = if app.is_notebook_collapsed(id) {
+                                        "  "
+                                    } else if app
+                                        .snippet_database
+                                        .notebooks
+                                        .get(id)
+                                        .map(|nb| !nb.children.is_empty())
+                                        .unwrap_or(false)
+                                    {
+                                        "  "
+                                    } else {
+                                        "  "
+                                    };
+
+                                    format!("{}{}", name, collapse_indicator)
+                                } else {
+                                    format!("   {} ", name)
+                                };
+
                                 let style = if *id == *notebook_id {
                                     Style::default().fg(RosePine::BASE).bg(RosePine::LOVE)
                                 } else {
                                     Style::default().fg(RosePine::SUBTLE)
                                 };
 
-                                spans.push(Span::styled(format!("   {} ", name), style));
+                                spans.push(Span::styled(notebook_name, style));
                             }
                         }
                         TreeItem::Snippet(snippet_id, _) => {
@@ -211,7 +253,6 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                                     ));
                                 }
 
-                                // Add the snippet to the breadcrumbs
                                 spans.push(Span::styled(
                                     " ❯ ",
                                     Style::default().fg(RosePine::MUTED),
