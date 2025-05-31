@@ -70,7 +70,7 @@ pub struct App {
     pub snippet_database: SnippetDatabase,
     pub storage_manager: Option<StorageManager>,
     pub selected_tree_item: usize,
-    pub hovered_tree_item: Option<usize>, // Track which item is being hovered over
+    pub hovered_tree_item: Option<usize>,
     pub tree_items: Vec<TreeItem>,
     pub current_notebook_id: Option<Uuid>,
     pub search_query: String,
@@ -216,13 +216,11 @@ impl App {
     pub fn refresh_tree_items(&mut self) {
         self.tree_items.clear();
 
-        // Add root notebooks - clone to avoid borrowing issues
         let root_notebooks = self.snippet_database.root_notebooks.clone();
         for notebook_id in root_notebooks {
             self.add_notebook_to_tree(notebook_id, 0);
         }
 
-        // If no notebooks exist, tree is empty
         if self.tree_items.is_empty() {
             self.selected_tree_item = 0;
         } else {
@@ -270,24 +268,9 @@ impl App {
             } else {
                 self.tree_items.len() - 1
             };
-            // Update the hovered item to match the selected item
             self.hovered_tree_item = Some(self.selected_tree_item);
             self.needs_redraw = true;
         }
-    }
-
-    /// Update the hovered item index
-    pub fn set_hovered_item(&mut self, index: usize) {
-        if index < self.tree_items.len() {
-            self.hovered_tree_item = Some(index);
-            self.needs_redraw = true;
-        }
-    }
-
-    /// Clear the hovered item
-    pub fn clear_hovered_item(&mut self) {
-        self.hovered_tree_item = None;
-        self.needs_redraw = true;
     }
 
     pub fn create_notebook(&mut self, name: String) -> Result<Uuid, String> {
@@ -408,10 +391,7 @@ impl App {
             }
         }
 
-        // Delete the notebook
         self.snippet_database.notebooks.remove(&notebook_id);
-
-        // Delete notebook directory
         if let Some(ref storage) = self.storage_manager {
             if let Err(e) = storage.delete_notebook_directory(notebook_id) {
                 eprintln!("Warning: Failed to delete notebook directory: {}", e);
@@ -428,14 +408,12 @@ impl App {
 
     pub fn delete_snippet(&mut self, snippet_id: Uuid) -> Result<(), String> {
         if let Some(snippet) = self.snippet_database.snippets.remove(&snippet_id) {
-            // Delete snippet file
             if let Some(ref storage) = self.storage_manager {
                 if let Err(e) = storage.delete_snippet_file(&snippet) {
                     eprintln!("Warning: Failed to delete snippet file: {}", e);
                 }
             }
 
-            // Update notebook snippet count
             if let Some(notebook) = self
                 .snippet_database
                 .notebooks
@@ -463,27 +441,6 @@ impl App {
 
     pub fn get_selected_item(&self) -> Option<&TreeItem> {
         self.tree_items.get(self.selected_tree_item)
-    }
-
-    /// Get the currently hovered tree item
-    pub fn get_hovered_item(&self) -> Option<&TreeItem> {
-        if let Some(index) = self.hovered_tree_item {
-            self.tree_items.get(index)
-        } else {
-            // If no item is hovered, use the selected item
-            self.get_selected_item()
-        }
-    }
-
-    pub fn get_selected_item_id(&self) -> Option<(Uuid, bool)> {
-        if let Some(item) = self.get_selected_item() {
-            match item {
-                TreeItem::Notebook(id, _) => Some((*id, true)),
-                TreeItem::Snippet(id, _) => Some((*id, false)),
-            }
-        } else {
-            None
-        }
     }
 
     pub fn save_database(&self) -> Result<(), String> {

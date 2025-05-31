@@ -57,7 +57,6 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &mut App) {
     right_content.render(navbar_chunks[1], frame.buffer_mut());
 }
 
-/// Get keyboard shortcuts based on current context
 fn get_context_shortcuts(app: &mut App) -> String {
     use crate::app::{AppState, InputMode};
 
@@ -68,7 +67,6 @@ fn get_context_shortcuts(app: &mut App) -> String {
     };
 
     match (&app.state, &app.input_mode) {
-        // Input modes have specific shortcuts
         (_, InputMode::CreateNotebook | InputMode::CreateSnippet | InputMode::Search) => {
             format!(" [⏎] Confirm │ [Esc] Cancel ")
         }
@@ -76,7 +74,6 @@ fn get_context_shortcuts(app: &mut App) -> String {
             format!(" [↑↓] Navigate │ [⏎] Select │ [Esc] Cancel ")
         }
 
-        // Start page shortcuts
         (AppState::StartPage, InputMode::Normal) => {
             format!(
                 "{} [↑↓] Navigate │ [⏎] Select │ [b] Boilerplates │ [s] Snippets │ [q] Quit ",
@@ -84,13 +81,12 @@ fn get_context_shortcuts(app: &mut App) -> String {
             )
         }
 
-        // Code snippets page shortcuts
         (AppState::CodeSnippets, InputMode::Normal) => {
             if app.snippet_database.notebooks.is_empty() {
                 format!("{} [n] New Notebook │ [h] Home │ [q] Quit ", back_hint)
             } else {
                 format!(
-                    "{} [↑↓] Navigate │ [⏎] Edit │ [n] Root Notebook │ [b] Nested Notebook │ [s] Snippet │ [d] Delete │ [/] Search │ [?] Help",
+                    "{} [n] Root Notebook │ [b] Nested Notebook │ [s] Snippet │ [d] Delete │ [/] Search │ [?] Help",
                     back_hint
                 )
             }
@@ -170,20 +166,18 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                             }
 
                             // Display the path in reverse order (from root to current)
-                            for (i, (id, name)) in path.iter().rev().enumerate() {
+                            for (_i, (id, name)) in path.iter().rev().enumerate() {
                                 spans.push(Span::styled(
                                     " ❯ ",
                                     Style::default().fg(RosePine::MUTED),
                                 ));
-
-                                // Highlight the current notebook
                                 let style = if *id == *notebook_id {
                                     Style::default().fg(RosePine::BASE).bg(RosePine::LOVE)
                                 } else {
                                     Style::default().fg(RosePine::SUBTLE)
                                 };
 
-                                spans.push(Span::styled(format!(" 📁 {} ", name), style));
+                                spans.push(Span::styled(format!("   {} ", name), style));
                             }
                         }
                         TreeItem::Snippet(snippet_id, _) => {
@@ -206,13 +200,13 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                                 }
 
                                 // Display the path in reverse order (from root to current)
-                                for (id, name) in path.iter().rev() {
+                                for (_id, name) in path.iter().rev() {
                                     spans.push(Span::styled(
                                         " ❯ ",
                                         Style::default().fg(RosePine::MUTED),
                                     ));
                                     spans.push(Span::styled(
-                                        format!(" 📁 {} ", name),
+                                        format!("   {} ", name),
                                         Style::default().fg(RosePine::SUBTLE),
                                     ));
                                 }
@@ -251,7 +245,6 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
 }
 
 /// Renders a centered work-in-progress dialog for pages under development
-
 pub fn render_wip_dialog(frame: &mut Frame, area: Rect, page_title: &str, app: &mut App) {
     let block = Block::bordered()
         .title(format!(" {} ", page_title))
