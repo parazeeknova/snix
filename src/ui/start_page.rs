@@ -14,7 +14,7 @@ use ratatui::{
 /// This is the primary entry point for rendering the start page UI. It orchestrates
 /// the layout of all visual elements and creates a cohesive, welcoming interface
 /// that serves as the application's main navigation hub.
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let main_area = frame.area();
 
     let block = Block::bordered()

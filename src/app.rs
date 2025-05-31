@@ -70,6 +70,7 @@ pub struct App {
     pub snippet_database: SnippetDatabase,
     pub storage_manager: Option<StorageManager>,
     pub selected_tree_item: usize,
+    pub hovered_tree_item: Option<usize>, // Track which item is being hovered over
     pub tree_items: Vec<TreeItem>,
     pub current_notebook_id: Option<Uuid>,
     pub search_query: String,
@@ -96,6 +97,7 @@ pub enum InputMode {
     CreateSnippet,
     SelectLanguage,
     Search,
+    HelpMenu,
     _RenameNotebook,
     _RenameSnippet,
 }
@@ -123,6 +125,7 @@ impl App {
             snippet_database,
             storage_manager,
             selected_tree_item: 0,
+            hovered_tree_item: None,
             tree_items: Vec::new(),
             current_notebook_id: None,
             search_query: String::new(),
@@ -254,17 +257,37 @@ impl App {
     pub fn next_tree_item(&mut self) {
         if !self.tree_items.is_empty() {
             self.selected_tree_item = (self.selected_tree_item + 1) % self.tree_items.len();
+            // Update the hovered item to match the selected item
+            self.hovered_tree_item = Some(self.selected_tree_item);
+            self.needs_redraw = true;
         }
     }
 
     pub fn previous_tree_item(&mut self) {
         if !self.tree_items.is_empty() {
-            self.selected_tree_item = if self.selected_tree_item == 0 {
-                self.tree_items.len() - 1
-            } else {
+            self.selected_tree_item = if self.selected_tree_item > 0 {
                 self.selected_tree_item - 1
+            } else {
+                self.tree_items.len() - 1
             };
+            // Update the hovered item to match the selected item
+            self.hovered_tree_item = Some(self.selected_tree_item);
+            self.needs_redraw = true;
         }
+    }
+
+    /// Update the hovered item index
+    pub fn set_hovered_item(&mut self, index: usize) {
+        if index < self.tree_items.len() {
+            self.hovered_tree_item = Some(index);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Clear the hovered item
+    pub fn clear_hovered_item(&mut self) {
+        self.hovered_tree_item = None;
+        self.needs_redraw = true;
     }
 
     pub fn create_notebook(&mut self, name: String) -> Result<Uuid, String> {
@@ -442,6 +465,16 @@ impl App {
         self.tree_items.get(self.selected_tree_item)
     }
 
+    /// Get the currently hovered tree item
+    pub fn get_hovered_item(&self) -> Option<&TreeItem> {
+        if let Some(index) = self.hovered_tree_item {
+            self.tree_items.get(index)
+        } else {
+            // If no item is hovered, use the selected item
+            self.get_selected_item()
+        }
+    }
+
     pub fn get_selected_item_id(&self) -> Option<(Uuid, bool)> {
         if let Some(item) = self.get_selected_item() {
             match item {
@@ -494,7 +527,7 @@ impl App {
     /// states, it displays a work-in-progress dialog with appropriate page titles
     /// and icons, maintaining consistent navigation while indicating that those
     /// features are under development.
-    pub fn render(&self, frame: &mut Frame) {
+    pub fn render(&mut self, frame: &mut Frame) {
         match self.state {
             AppState::StartPage => start_page::render(frame, self),
             AppState::Boilerplates => {

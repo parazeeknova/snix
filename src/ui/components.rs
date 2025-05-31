@@ -10,7 +10,7 @@
 //! - **Work-in-Progress Dialog**: Centered modal for pages under development
 //! - **Breadcrumb System**: Hierarchical navigation showing current location
 
-use crate::app::App;
+use crate::app::{App, TreeItem};
 use crate::ui::colors::RosePine;
 use ratatui::{
     Frame,
@@ -27,7 +27,7 @@ use ratatui::{
 /// 1. Shows breadcrumb navigation indicating the user's current location in the app
 /// 2. Displays available keyboard shortcuts relevant to the current context
 
-pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &mut App) {
     let navbar_chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).split(area);
 
     let breadcrumbs = get_breadcrumbs_with_symbols(app);
@@ -58,7 +58,7 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Get keyboard shortcuts based on current context
-fn get_context_shortcuts(app: &App) -> String {
+fn get_context_shortcuts(app: &mut App) -> String {
     use crate::app::{AppState, InputMode};
 
     let back_hint = if app.can_go_back() {
@@ -90,7 +90,7 @@ fn get_context_shortcuts(app: &App) -> String {
                 format!("{} [n] New Notebook │ [h] Home │ [q] Quit ", back_hint)
             } else {
                 format!(
-                    "{} [↑↓] Navigate │ [⏎] Edit │ [n] Root Notebook │ [b] Nested Notebook │ [s] Snippet │ [d] Delete │ [/] Search │ [h] Home ",
+                    "{} [↑↓] Navigate │ [⏎] Edit │ [n] Root Notebook │ [b] Nested Notebook │ [s] Snippet │ [d] Delete │ [/] Search │ [?] Help",
                     back_hint
                 )
             }
@@ -112,9 +112,10 @@ fn get_context_shortcuts(app: &App) -> String {
 /// current location within the application hierarchy. It uses a combination of symbols,
 /// colors, and background highlights to create an intuitive navigation experience.
 
-fn get_breadcrumbs_with_symbols(app: &App) -> Line<'static> {
+fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
     let mut spans = Vec::new();
 
+    // Always start with Home
     if app.state == crate::app::AppState::StartPage {
         spans.push(Span::styled(
             " 󰋜 Home ",
@@ -127,76 +128,122 @@ fn get_breadcrumbs_with_symbols(app: &App) -> Line<'static> {
         ));
     }
 
-    for state in &app.page_history[1..] {
-        match state {
-            crate::app::AppState::StartPage => {}
-            crate::app::AppState::Boilerplates => {
-                spans.push(Span::styled(" ❯ ", Style::default().fg(RosePine::MUTED)));
-                spans.push(Span::styled(
-                    " Boilerplates ",
-                    Style::default().fg(RosePine::SUBTLE),
-                ));
-            }
-            crate::app::AppState::Marketplace => {
-                spans.push(Span::styled(" ❯ ", Style::default().fg(RosePine::MUTED)));
-                spans.push(Span::styled(
-                    " Marketplace ",
-                    Style::default().fg(RosePine::SUBTLE),
-                ));
-            }
-            crate::app::AppState::CodeSnippets => {
-                spans.push(Span::styled(" ❯ ", Style::default().fg(RosePine::MUTED)));
-                spans.push(Span::styled(
-                    " Snippets ",
-                    Style::default().fg(RosePine::SUBTLE),
-                ));
-            }
-            crate::app::AppState::InfoPage => {
-                spans.push(Span::styled(" ❯ ", Style::default().fg(RosePine::MUTED)));
-                spans.push(Span::styled(
-                    " Info ",
-                    Style::default().fg(RosePine::SUBTLE),
-                ));
-            }
-            crate::app::AppState::Settings => {
-                spans.push(Span::styled(" ❯ ", Style::default().fg(RosePine::MUTED)));
-                spans.push(Span::styled(
-                    " Settings ",
-                    Style::default().fg(RosePine::SUBTLE),
-                ));
-            }
-        }
-    }
-
+    // Add the current section (Snippets, Boilerplates, etc.)
     if app.state != crate::app::AppState::StartPage {
         spans.push(Span::styled(" ❯ ", Style::default().fg(RosePine::MUTED)));
 
-        let (current_page_name, style) = match app.state {
-            crate::app::AppState::Boilerplates => (
-                " Boilerplates ",
-                Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
-            ),
-            crate::app::AppState::Marketplace => (
-                " Marketplace ",
-                Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
-            ),
-            crate::app::AppState::CodeSnippets => (
-                " Snippets ",
-                Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
-            ),
-            crate::app::AppState::InfoPage => (
-                " Info ",
-                Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
-            ),
-            crate::app::AppState::Settings => (
-                " Settings ",
-                Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
-            ),
-            _ => ("", Style::default()),
-        };
+        match app.state {
+            crate::app::AppState::Boilerplates => {
+                spans.push(Span::styled(
+                    " Boilerplates ",
+                    Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
+                ));
+            }
+            crate::app::AppState::Marketplace => {
+                spans.push(Span::styled(
+                    " Marketplace ",
+                    Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
+                ));
+            }
+            crate::app::AppState::CodeSnippets => {
+                spans.push(Span::styled(
+                    " Snippets ",
+                    Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
+                ));
 
-        if !current_page_name.is_empty() {
-            spans.push(Span::styled(current_page_name, style));
+                // Add the full path for the selected item in the tree view
+                if let Some(selected_item) = app.get_selected_item() {
+                    match selected_item {
+                        TreeItem::Notebook(notebook_id, _) => {
+                            // Build the full path for the notebook
+                            let mut path = Vec::new();
+                            let mut current_id = Some(*notebook_id);
+
+                            // Collect all parent notebooks up to the root
+                            while let Some(id) = current_id {
+                                if let Some(notebook) = app.snippet_database.notebooks.get(&id) {
+                                    path.push((id, notebook.name.clone()));
+                                    current_id = notebook.parent_id;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            // Display the path in reverse order (from root to current)
+                            for (i, (id, name)) in path.iter().rev().enumerate() {
+                                spans.push(Span::styled(
+                                    " ❯ ",
+                                    Style::default().fg(RosePine::MUTED),
+                                ));
+
+                                // Highlight the current notebook
+                                let style = if *id == *notebook_id {
+                                    Style::default().fg(RosePine::BASE).bg(RosePine::LOVE)
+                                } else {
+                                    Style::default().fg(RosePine::SUBTLE)
+                                };
+
+                                spans.push(Span::styled(format!(" 📁 {} ", name), style));
+                            }
+                        }
+                        TreeItem::Snippet(snippet_id, _) => {
+                            if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                                let notebook_id = snippet.notebook_id;
+
+                                // Build the full path for the notebook containing the snippet
+                                let mut path = Vec::new();
+                                let mut current_id = Some(notebook_id);
+
+                                // Collect all parent notebooks up to the root
+                                while let Some(id) = current_id {
+                                    if let Some(notebook) = app.snippet_database.notebooks.get(&id)
+                                    {
+                                        path.push((id, notebook.name.clone()));
+                                        current_id = notebook.parent_id;
+                                    } else {
+                                        break;
+                                    }
+                                }
+
+                                // Display the path in reverse order (from root to current)
+                                for (id, name) in path.iter().rev() {
+                                    spans.push(Span::styled(
+                                        " ❯ ",
+                                        Style::default().fg(RosePine::MUTED),
+                                    ));
+                                    spans.push(Span::styled(
+                                        format!(" 📁 {} ", name),
+                                        Style::default().fg(RosePine::SUBTLE),
+                                    ));
+                                }
+
+                                // Add the snippet to the breadcrumbs
+                                spans.push(Span::styled(
+                                    " ❯ ",
+                                    Style::default().fg(RosePine::MUTED),
+                                ));
+                                spans.push(Span::styled(
+                                    format!(" {} {} ", snippet.language.icon(), snippet.title),
+                                    Style::default().fg(RosePine::BASE).bg(RosePine::GOLD),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            crate::app::AppState::InfoPage => {
+                spans.push(Span::styled(
+                    " Info ",
+                    Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
+                ));
+            }
+            crate::app::AppState::Settings => {
+                spans.push(Span::styled(
+                    " Settings ",
+                    Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
+                ));
+            }
+            _ => {}
         }
     }
 
@@ -205,7 +252,7 @@ fn get_breadcrumbs_with_symbols(app: &App) -> Line<'static> {
 
 /// Renders a centered work-in-progress dialog for pages under development
 
-pub fn render_wip_dialog(frame: &mut Frame, area: Rect, page_title: &str, app: &App) {
+pub fn render_wip_dialog(frame: &mut Frame, area: Rect, page_title: &str, app: &mut App) {
     let block = Block::bordered()
         .title(format!(" {} ", page_title))
         .title_alignment(Alignment::Center)

@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     while !should_quit {
         if app.needs_redraw {
-            force_redraw(&mut terminal, &app)?;
+            force_redraw(&mut terminal, &mut app)?;
             app.needs_redraw = false;
         } else {
             terminal.draw(|frame| app.render(frame))?;
@@ -61,8 +61,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
                 should_quit = handlers::keys::handle_key_events(key, &mut app);
+
                 if app.needs_redraw {
-                    force_redraw(&mut terminal, &app)?;
+                    force_redraw(&mut terminal, &mut app)?;
                     app.needs_redraw = false;
                 }
             }
@@ -87,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// Used after suspending for editor to ensure a clean UI state
 fn force_redraw<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
-    app: &App,
+    app: &mut App,
 ) -> Result<(), Box<dyn Error>> {
     terminal.clear()?;
     use ratatui::crossterm::{

@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Widget, Wrap},
 };
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let main_area = frame.area();
 
     if app.snippet_database.notebooks.is_empty() {
@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
-fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
+fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered()
         .title("  Code Snippets Manager ")
         .title_alignment(Alignment::Center)
@@ -88,7 +88,7 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &App) {
     render_overlays(frame, area, app);
 }
 
-fn render_main_view(frame: &mut Frame, area: Rect, app: &App) {
+fn render_main_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered()
         .title("  Code Snippets Manager ")
         .title_alignment(Alignment::Center)
@@ -113,7 +113,7 @@ fn render_main_view(frame: &mut Frame, area: Rect, app: &App) {
 
 /// Render all overlays (input dialogs, language selection, etc.)
 /// This function should ALWAYS be called last to ensure overlays appear on top
-fn render_overlays(frame: &mut Frame, area: Rect, app: &App) {
+fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
     match app.input_mode {
         InputMode::CreateNotebook
         | InputMode::CreateNestedNotebook
@@ -126,6 +126,9 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &App) {
         InputMode::SelectLanguage => {
             render_language_selection_overlay(frame, area, app);
         }
+        InputMode::HelpMenu => {
+            render_help_menu_overlay(frame, area, app);
+        }
         InputMode::Normal => {
             if let Some(ref message) = app.error_message {
                 render_message_overlay(frame, area, message, true);
@@ -137,7 +140,117 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render language selection overlay
-fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &App) {
+/// Renders a help menu overlay showing all available keyboard shortcuts
+fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
+    // Position the help menu in the bottom right corner
+    let width = 60;
+    let height = 24;
+    let popup_area = Rect::new(
+        area.width.saturating_sub(width + 2), // 2 cells padding from right edge
+        area.height.saturating_sub(height + 2), // 2 cells padding from bottom edge
+        width.min(area.width),
+        height.min(area.height),
+    );
+
+    Clear.render(popup_area, frame.buffer_mut());
+
+    let block = Block::bordered()
+        .title(" 🔑 Keyboard Shortcuts ")
+        .title_alignment(Alignment::Center)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::IRIS));
+
+    let inner_area = block.inner(popup_area);
+    block.render(popup_area, frame.buffer_mut());
+
+    let shortcuts = vec![
+        Line::from(Span::styled(
+            "Navigation",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ↑/k ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move up"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ↓/j ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Move down"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ⏎   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Select/Edit"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ←/h ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Go back"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Notebooks",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  n   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Create root notebook"),
+        ]),
+        Line::from(vec![
+            Span::styled("  b   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Create nested notebook inside selected notebook"),
+        ]),
+        Line::from(vec![
+            Span::styled("  d   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Delete notebook/snippet"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Snippets",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  s   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Create snippet in current notebook"),
+        ]),
+        Line::from(vec![
+            Span::styled("  /   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Search snippets"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "General",
+            Style::default().fg(RosePine::LOVE).bold(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ?   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Toggle this help menu"),
+        ]),
+        Line::from(vec![
+            Span::styled("  h   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Go to home page"),
+        ]),
+        Line::from(vec![
+            Span::styled("  q   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Quit application"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Press Esc or ? to close this menu",
+            Style::default().fg(RosePine::SUBTLE).italic(),
+        )),
+    ];
+
+    let help_paragraph = Paragraph::new(shortcuts)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(RosePine::TEXT));
+
+    help_paragraph.render(inner_area, frame.buffer_mut());
+}
+
+fn render_language_selection_overlay(frame: &mut Frame, area: Rect, app: &mut App) {
     let popup_area = centered_rect(70, 80, area);
     Clear.render(popup_area, frame.buffer_mut());
 
@@ -285,7 +398,7 @@ fn get_available_languages() -> Vec<crate::models::SnippetLanguage> {
     ]
 }
 
-fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
+fn render_tree_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered()
         .title("  Notebooks & Snippets ")
         .border_type(BorderType::Rounded)
@@ -300,6 +413,12 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
             .style(Style::default().fg(RosePine::MUTED));
         empty_text.render(inner_area, frame.buffer_mut());
         return;
+    }
+
+    // Before rendering, set the hovered item to the selected item if none is set
+    // This ensures breadcrumbs always show something relevant
+    if app.hovered_tree_item.is_none() {
+        app.hovered_tree_item = Some(app.selected_tree_item);
     }
 
     let items: Vec<ListItem> = app
@@ -358,6 +477,7 @@ fn render_tree_view(frame: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
+    // Create a list with mouse support enabled for hovering
     let list = List::new(items)
         .highlight_style(
             Style::default()
@@ -397,7 +517,7 @@ fn create_tree_indent(depth: usize, is_last_item: bool) -> String {
     indent
 }
 
-fn render_preview_panel(frame: &mut Frame, area: Rect, app: &App) {
+fn render_preview_panel(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered()
         .title("  Preview ")
         .border_type(BorderType::Rounded)
@@ -681,7 +801,7 @@ fn display_regular_content(
     content_paragraph.render(area, frame.buffer_mut());
 }
 
-fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App) {
+fn render_input_overlay(frame: &mut Frame, area: Rect, app: &mut App) {
     let popup_area = centered_rect(60, 20, area);
 
     Clear.render(popup_area, frame.buffer_mut());
@@ -763,7 +883,7 @@ fn render_snippet_editor(frame: &mut Frame, area: Rect, _app: &App, _snippet_id:
     paragraph.render(area, frame.buffer_mut());
 }
 
-fn render_create_notebook_dialog(frame: &mut Frame, area: Rect, app: &App) {
+fn render_create_notebook_dialog(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.input_mode == InputMode::CreateNotebook {
         render_input_overlay(frame, area, app);
     } else {
@@ -772,7 +892,12 @@ fn render_create_notebook_dialog(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn render_create_snippet_dialog(frame: &mut Frame, area: Rect, app: &App, notebook_id: uuid::Uuid) {
+fn render_create_snippet_dialog(
+    frame: &mut Frame,
+    area: Rect,
+    app: &mut App,
+    notebook_id: uuid::Uuid,
+) {
     match app.input_mode {
         InputMode::CreateSnippet => {
             // Check that we have a valid notebook
@@ -845,7 +970,7 @@ fn render_create_snippet_dialog(frame: &mut Frame, area: Rect, app: &App, notebo
     }
 }
 
-fn render_search_view(frame: &mut Frame, area: Rect, _app: &App) {
+fn render_search_view(frame: &mut Frame, area: Rect, _app: &mut App) {
     let paragraph = Paragraph::new("Search functionality coming soon...")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::TEXT));

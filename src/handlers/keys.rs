@@ -27,6 +27,17 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
+        // Help menu toggle (works from any page)
+        KeyCode::Char('?') => {
+            app.clear_messages();
+            if app.input_mode == InputMode::HelpMenu {
+                app.input_mode = InputMode::Normal;
+            } else {
+                app.input_mode = InputMode::HelpMenu;
+            }
+            false
+        }
+
         // Global back navigation - only works if there's history to go back to
         KeyCode::Backspace => {
             if app.can_go_back() {
@@ -48,6 +59,7 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
 fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         KeyCode::Esc => {
+            // Close any input mode including help menu
             app.input_mode = InputMode::Normal;
             app.input_buffer.clear();
             app.pending_snippet_title.clear();
