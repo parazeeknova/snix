@@ -1,4 +1,4 @@
-use crate::app::{App, CodeSnippetsState, InputMode, TreeItem};
+use crate::app::{App, CodeSnippetsState, InputMode, SearchResultType, TreeItem};
 use crate::ui::colors::RosePine;
 use crate::ui::components::render_bottom_bar;
 use once_cell::sync::Lazy;
@@ -187,11 +187,9 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
     block.render(popup_area, frame.buffer_mut());
 
     // Split the shortcuts into a two-column layout
-    let columns = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ]).split(inner_area);
-    
+    let columns = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner_area);
+
     let left_column = vec![
         Line::from(Span::styled(
             "Navigation",
@@ -281,7 +279,7 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
             Span::raw("Scroll content down (5 lines)"),
         ]),
     ];
-    
+
     let right_column = vec![
         Line::from(Span::styled(
             "Snippets",
@@ -1547,18 +1545,249 @@ fn render_create_snippet_dialog(
     }
 }
 
-fn render_search_view(frame: &mut Frame, area: Rect, _app: &mut App) {
-    let paragraph = Paragraph::new("Search functionality coming soon...")
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(RosePine::TEXT));
-    paragraph.render(area, frame.buffer_mut());
-}
+fn render_search_view(frame: &mut Frame, area: Rect, app: &mut App) {
+    let block = Block::bordered()
+        .title(" 󰍉 Search Snippets ")
+        .title_alignment(Alignment::Center)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
 
-fn render_settings_view(frame: &mut Frame, area: Rect, _app: &App) {
-    let paragraph = Paragraph::new("Settings coming soon...")
-        .alignment(Alignment::Center)
+    let inner_area = block.inner(area);
+    block.render(area, frame.buffer_mut());
+
+    // Define layout with search input at top, results in middle, preview at bottom
+    let chunks = Layout::vertical([
+        Constraint::Length(3),  // Search input
+        Constraint::Fill(1),    // Results
+        Constraint::Length(10), // Preview
+        Constraint::Length(3),  // Bottom bar
+    ])
+    .split(inner_area);
+
+    // Create search input box
+    let input_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::FOAM));
+
+    let input_area = input_block.inner(chunks[0]);
+    input_block.render(chunks[0], frame.buffer_mut());
+
+    // Render search query
+    let search_input = Paragraph::new(format!(" {} ", app.search_query))
         .style(Style::default().fg(RosePine::TEXT));
-    paragraph.render(area, frame.buffer_mut());
+    search_input.render(input_area, frame.buffer_mut());
+
+    // Render results if there are any
+    if !app.search_results.is_empty() {
+        // Create results block
+        let results_block = Block::bordered()
+            .title(format!(" Results ({}) ", app.search_results.len()))
+            .border_type(BorderType::Rounded)
+            .style(Style::default().fg(RosePine::SUBTLE));
+
+        let results_area = results_block.inner(chunks[1]);
+        results_block.render(chunks[1], frame.buffer_mut());
+
+        // Create list items for results
+        let results_items: Vec<ListItem> = app
+            .search_results
+            .iter()
+            .enumerate()
+            .map(|(i, result)| {
+                let icon = match result.result_type {
+                    SearchResultType::Notebook => "󰠮 ",
+                    SearchResultType::Snippet => "󰈮 ",
+                    SearchResultType::CodeContent => "󰧮 ",
+                };
+
+                let (name_style, context_style) = if i == app.selected_search_result {
+                    (
+                        Style::default().fg(RosePine::LOVE).bold(),
+                        Style::default().fg(RosePine::LOVE),
+                    )
+                } else {
+                    (
+                        Style::default().fg(RosePine::TEXT),
+                        Style::default().fg(RosePine::SUBTLE),
+                    )
+                };
+
+                let parent_path = crate::search::get_parent_path(app, result.parent_id);
+                let parent_text = if !parent_path.is_empty() {
+                    format!(" | {}", parent_path)
+                } else {
+                    String::new()
+                };
+
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::styled(icon, name_style),
+                        Span::styled(&result.name, name_style),
+                        Span::styled(parent_text, context_style),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("   ", Style::default()),
+                        Span::styled(&result.match_context, context_style),
+                    ]),
+                ])
+            })
+            .collect();
+
+        let results_list = List::new(results_items)
+            .style(Style::default())
+            .highlight_style(
+                Style::default()
+                    .fg(RosePine::LOVE)
+                    .bg(RosePine::HIGHLIGHT_LOW),
+            )
+            .highlight_symbol("▶ ");
+
+        frame.render_stateful_widget(
+            results_list,
+            results_area,
+            &mut ListState::default().with_selected(Some(app.selected_search_result)),
+        );
+
+        // Render preview of selected item
+        if let Some(result) = app.search_results.get(app.selected_search_result) {
+            let preview_block = Block::bordered()
+                .title(" Preview ")
+                .border_type(BorderType::Rounded)
+                .style(Style::default().fg(RosePine::FOAM));
+
+            let preview_area = preview_block.inner(chunks[2]);
+            preview_block.render(chunks[2], frame.buffer_mut());
+
+            match result.result_type {
+                SearchResultType::Notebook => {
+                    // Preview notebook contents
+                    if let Some(notebook) = app.snippet_database.notebooks.get(&result.id) {
+                        let snippet_count = app
+                            .snippet_database
+                            .snippets
+                            .values()
+                            .filter(|s| s.notebook_id == result.id)
+                            .count();
+
+                        let child_count = notebook.children.len();
+
+                        let desc = notebook.description.as_deref().unwrap_or("No description");
+
+                        let preview_text = vec![
+                            Line::from(vec![
+                                Span::styled("Name: ", Style::default().fg(RosePine::MUTED)),
+                                Span::styled(
+                                    &notebook.name,
+                                    Style::default().fg(RosePine::TEXT).bold(),
+                                ),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Snippets: ", Style::default().fg(RosePine::MUTED)),
+                                Span::styled(
+                                    snippet_count.to_string(),
+                                    Style::default().fg(RosePine::LOVE),
+                                ),
+                            ]),
+                            Line::from(vec![
+                                Span::styled(
+                                    "Child Notebooks: ",
+                                    Style::default().fg(RosePine::MUTED),
+                                ),
+                                Span::styled(
+                                    child_count.to_string(),
+                                    Style::default().fg(RosePine::GOLD),
+                                ),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Description: ", Style::default().fg(RosePine::MUTED)),
+                                Span::styled(desc, Style::default().fg(RosePine::TEXT)),
+                            ]),
+                        ];
+
+                        let preview_para = Paragraph::new(preview_text).wrap(Wrap { trim: true });
+
+                        preview_para.render(preview_area, frame.buffer_mut());
+                    }
+                }
+                SearchResultType::Snippet | SearchResultType::CodeContent => {
+                    if let Some(snippet) = app.snippet_database.snippets.get(&result.id) {
+                        let preview_text = vec![
+                            Line::from(vec![
+                                Span::styled("Title: ", Style::default().fg(RosePine::MUTED)),
+                                Span::styled(
+                                    &snippet.title,
+                                    Style::default().fg(RosePine::TEXT).bold(),
+                                ),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Language: ", Style::default().fg(RosePine::MUTED)),
+                                Span::styled(
+                                    snippet.language.display_name(),
+                                    Style::default().fg(RosePine::FOAM),
+                                ),
+                            ]),
+                            Line::from(vec![
+                                Span::styled("Description: ", Style::default().fg(RosePine::MUTED)),
+                                Span::styled(
+                                    snippet.description.as_deref().unwrap_or("No description"),
+                                    Style::default().fg(RosePine::TEXT),
+                                ),
+                            ]),
+                            Line::from(""),
+                            Line::from(Span::styled(
+                                "Content Preview:",
+                                Style::default().fg(RosePine::MUTED),
+                            )),
+                        ];
+
+                        let mut para_text = preview_text;
+
+                        for line in snippet.content.lines().take(5) {
+                            para_text.push(Line::from(Span::styled(
+                                line,
+                                Style::default().fg(RosePine::TEXT),
+                            )));
+                        }
+
+                        let preview_para = Paragraph::new(para_text).wrap(Wrap { trim: true });
+
+                        preview_para.render(preview_area, frame.buffer_mut());
+                    }
+                }
+            }
+        }
+    } else if !app.search_query.is_empty() {
+        let no_results_text = Paragraph::new("No results found. Try a different search query.")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(RosePine::MUTED));
+
+        no_results_text.render(chunks[1], frame.buffer_mut());
+    } else {
+        let instructions = vec![
+            Line::from(vec![Span::styled(
+                "Search Tips:",
+                Style::default().fg(RosePine::GOLD).bold(),
+            )]),
+            Line::from(""),
+            Line::from("Type to search across notebooks, snippets, and content"),
+            Line::from("Search matches titles, descriptions, and code content"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Examples: ", Style::default().fg(RosePine::FOAM).bold()),
+                Span::styled(
+                    "function, rust, todo, etc.",
+                    Style::default().fg(RosePine::TEXT),
+                ),
+            ]),
+        ];
+
+        let instructions_para = Paragraph::new(instructions)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(RosePine::SUBTLE));
+
+        instructions_para.render(chunks[1], frame.buffer_mut());
+    }
+    render_bottom_bar(frame, chunks[3], app);
 }
 
 fn spotlight_bar(width_percent: u16, r: Rect) -> Rect {
@@ -1575,4 +1804,11 @@ fn spotlight_bar(width_percent: u16, r: Rect) -> Rect {
         Constraint::Percentage((100 - width_percent) / 2),
     ])
     .split(layout[1])[1]
+}
+
+fn render_settings_view(frame: &mut Frame, area: Rect, _app: &App) {
+    let paragraph = Paragraph::new("Settings coming soon...")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(RosePine::TEXT));
+    paragraph.render(area, frame.buffer_mut());
 }

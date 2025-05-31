@@ -16,6 +16,7 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     crossterm::{
+        cursor::Show,
         event::{self, Event},
         event::{DisableMouseCapture, EnableMouseCapture},
         execute,
@@ -24,62 +25,84 @@ use ratatui::{
 };
 use std::error::Error;
 use std::io::{self};
+use std::panic;
 use std::time::Duration;
 
 mod app;
 mod handlers;
 mod models;
+mod search;
 mod ui;
 
-/// Application entry point and initialization
-/// This function initializes the terminal, sets up event handling, and
-/// runs the main application loop. It ensures proper terminal cleanup
+use handlers::keys::handle_key_events;
+
+/// Main entry point for the application
+/// Sets up the terminal, runs the application loop, and ensures clean exit
 /// even if the application panics.
 fn main() -> Result<(), Box<dyn Error>> {
+    // Set up panic hook
+    panic::set_hook(Box::new(|info| {
+        let _ = cleanup_terminal();
+        eprintln!("Panic occurred: {:?}", info);
+    }));
+
+    // Set up the terminal
+    let mut terminal = setup_terminal()?;
+
+    // Run the application
+    let result = run_app(&mut terminal);
+
+    // Clean up the terminal
+    cleanup_terminal()?;
+
+    // Handle the result
+    if let Err(err) = result {
+        eprintln!("Error: {}", err);
+        return Err(err);
+    }
+
+    Ok(())
+}
+
+/// Sets up the terminal for the TUI application
+fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, Box<dyn Error>> {
     println!("Starting snix - Template & Boilerplate Manager");
     println!("Created by parazeeknova");
-
-    color_eyre::install()?;
+    println!("Loading...");
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let terminal = Terminal::new(backend)?;
 
+    Ok(terminal)
+}
+
+/// Runs the main application loop
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     let mut should_quit = false;
 
     while !should_quit {
         if app.needs_redraw {
-            force_redraw(&mut terminal, &mut app)?;
+            force_redraw(terminal, &mut app)?;
             app.needs_redraw = false;
         } else {
             terminal.draw(|frame| app.render(frame))?;
         }
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = event::read()? {
-                should_quit = handlers::keys::handle_key_events(key, &mut app);
+                should_quit = handle_key_events(key, &mut app);
 
                 if app.needs_redraw {
-                    force_redraw(&mut terminal, &mut app)?;
+                    force_redraw(terminal, &mut app)?;
                     app.needs_redraw = false;
                 }
             }
         }
         app._tick();
     }
-
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-
-    println!("Thanks for using snix! Goodbye!");
 
     Ok(())
 }
@@ -100,6 +123,18 @@ fn force_redraw<B: ratatui::backend::Backend>(
     execute!(stdout(), Clear(ClearType::All))?;
     terminal.draw(|frame| app.render(frame))?;
     terminal.draw(|frame| app.render(frame))?;
+
+    Ok(())
+}
+
+/// Cleans up the terminal state when the application exits
+fn cleanup_terminal() -> Result<(), Box<dyn Error>> {
+    disable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(stdout, Show)?;
+
+    println!("Thanks for using snix! Goodbye!");
 
     Ok(())
 }

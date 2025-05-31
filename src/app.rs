@@ -68,12 +68,40 @@ pub enum ConfirmationState {
         item_id: Uuid,
         is_notebook: bool,
     },
-    MoveItem {
+    _MoveItem {
         item_id: Uuid,
         is_notebook: bool,
         target_id: Uuid,
     },
 }
+
+// Add the following enum to track different search result types
+#[derive(Debug, Clone, PartialEq)]
+pub enum SearchResultType {
+    Notebook,
+    Snippet,
+    CodeContent,
+}
+
+// Add a struct to represent a search result
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub id: Uuid,
+    pub name: String,
+    pub result_type: SearchResultType,
+    pub match_context: String,
+    pub parent_id: Option<Uuid>,
+}
+
+/// Main Application State Container
+///
+/// This struct holds all the state information needed to run the application.
+/// It tracks the current page, menu selection, and navigation history to provide
+/// a smooth user experience with proper back navigation.
+///
+/// The App struct is the central hub for all state management and is passed
+/// to rendering functions to determine what content to display and how to
+/// style interactive elements based on the current state.
 
 #[derive(Debug)]
 pub struct App {
@@ -90,6 +118,8 @@ pub struct App {
     pub tree_items: Vec<TreeItem>,
     pub current_notebook_id: Option<Uuid>,
     pub search_query: String,
+    pub search_results: Vec<SearchResult>,
+    pub selected_search_result: usize,
     pub show_favorites_only: bool,
     pub error_message: Option<String>,
     pub success_message: Option<String>,
@@ -154,6 +184,8 @@ impl App {
             tree_items: Vec::new(),
             current_notebook_id: None,
             search_query: String::new(),
+            search_results: Vec::new(),
+            selected_search_result: 0,
             show_favorites_only: false,
             error_message: None,
             success_message: None,
@@ -1516,7 +1548,7 @@ impl App {
                     }
                 }
             }
-            ConfirmationState::MoveItem {
+            ConfirmationState::_MoveItem {
                 item_id,
                 is_notebook,
                 target_id,
@@ -1537,7 +1569,6 @@ impl App {
                     }
                 };
 
-                // Reset confirmation state
                 self.confirmation_state = ConfirmationState::None;
 
                 match result {
@@ -1563,14 +1594,45 @@ impl App {
         }
     }
 
-    /// Cancel the current pending action
     pub fn cancel_pending_action(&mut self) {
         self.confirmation_state = ConfirmationState::None;
         self.clear_messages();
     }
 
-    /// Check if there's a pending action that needs confirmation
     pub fn has_pending_action(&self) -> bool {
         !matches!(self.confirmation_state, ConfirmationState::None)
+    }
+
+    pub fn perform_search(&mut self, query: &str) -> usize {
+        crate::search::perform_search(self, query)
+    }
+
+    pub fn next_search_result(&mut self) {
+        if !self.search_results.is_empty() {
+            self.selected_search_result =
+                (self.selected_search_result + 1) % self.search_results.len();
+            self.needs_redraw = true;
+        }
+    }
+
+    pub fn previous_search_result(&mut self) {
+        if !self.search_results.is_empty() {
+            self.selected_search_result = if self.selected_search_result > 0 {
+                self.selected_search_result - 1
+            } else {
+                self.search_results.len() - 1
+            };
+            self.needs_redraw = true;
+        }
+    }
+
+    pub fn open_selected_search_result(&mut self) -> bool {
+        crate::search::open_selected_search_result(self)
+    }
+
+    pub fn clear_search(&mut self) {
+        self.search_results.clear();
+        self.selected_search_result = 0;
+        self.search_query.clear();
     }
 }

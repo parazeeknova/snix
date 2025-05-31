@@ -253,10 +253,23 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     app.code_snippets_state = CodeSnippetsState::NotebookList;
                 }
                 InputMode::Search => {
-                    // TODO: Implement search
                     app.search_query = input;
                     app.input_mode = InputMode::Normal;
                     app.code_snippets_state = CodeSnippetsState::SearchSnippets;
+
+                    // Perform the initial search - fix borrow checker issue by cloning search_query
+                    let query = app.search_query.clone();
+                    let count = app.perform_search(&query);
+
+                    if count == 0 && !app.search_query.is_empty() {
+                        app.set_success_message(format!(
+                            "No results found for '{}'",
+                            app.search_query
+                        ));
+                    } else if count > 0 {
+                        app.set_success_message(format!("Found {} results", count));
+                    }
+
                     app.clear_messages();
                 }
                 InputMode::EditSnippetDescription => {
@@ -809,9 +822,51 @@ fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, _snippet_id: uuid::U
 fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         KeyCode::Esc => {
+            app.clear_search();
             app.code_snippets_state = CodeSnippetsState::NotebookList;
+            app.clear_messages();
             false
         }
+
+        // Navigation of search results
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.previous_search_result();
+            false
+        }
+
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.next_search_result();
+            false
+        }
+
+        // Open selected result
+        KeyCode::Enter => {
+            if app.open_selected_search_result() {
+                // If successful, the application state may have changed
+                // Don't do anything else - the app state handles the transition
+            }
+            false
+        }
+
+        // Handle input for search
+        KeyCode::Char(c) => {
+            app.search_query.push(c);
+            let query = app.search_query.clone();
+            let _count = app.perform_search(&query);
+            app.needs_redraw = true;
+            false
+        }
+
+        KeyCode::Backspace => {
+            if !app.search_query.is_empty() {
+                app.search_query.pop();
+                let query = app.search_query.clone();
+                let _count = app.perform_search(&query);
+                app.needs_redraw = true;
+            }
+            false
+        }
+
         _ => false,
     }
 }
@@ -851,7 +906,7 @@ fn get_current_notebook_id(app: &App) -> Option<uuid::Uuid> {
 }
 
 /// Launch external editor for snippet editing
-fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
+pub fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
     // Set flag to indicate a full UI redraw will be needed after editor use
     app.needs_redraw = true;
 
@@ -1025,6 +1080,17 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
                 // Safety fallback for any invalid menu indices
                 _ => false,
             }
+        }
+
+        // Quick search functionality from start page
+        KeyCode::Char('/') => {
+            app.navigate_to(AppState::CodeSnippets);
+            app.code_snippets_state = CodeSnippetsState::SearchSnippets;
+            app.input_mode = InputMode::Search;
+            app.input_buffer.clear();
+            app.search_query.clear();
+            app.search_results.clear();
+            false
         }
 
         // Direct navigation shortcuts - Boilerplates (both cases supported)

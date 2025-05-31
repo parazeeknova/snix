@@ -58,7 +58,7 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn get_context_shortcuts(app: &mut App) -> String {
-    use crate::app::{AppState, InputMode};
+    use crate::app::{AppState, CodeSnippetsState, InputMode};
 
     let back_hint = if app.can_go_back() { " [←] │ " } else { "" };
 
@@ -72,55 +72,69 @@ fn get_context_shortcuts(app: &mut App) -> String {
 
         (AppState::StartPage, InputMode::Normal) => {
             format!(
-                "{} [↑↓] Navigate │ [⏎] Select │ [b] Boilerplates │ [s] Snippets │ [q] Quit ",
+                "{} [↑↓] Navigate │ [⏎] Select │ [/] Search │ [b] Boilerplates │ [s] Snippets │ [q] Quit ",
                 back_hint
             )
         }
 
         (AppState::CodeSnippets, InputMode::Normal) => {
-            if app.snippet_database.notebooks.is_empty() {
-                format!("{} [n] New Notebook │ [h] Home │ [q] Quit ", back_hint)
-            } else {
-                // Check if a notebook is selected and can be collapsed/expanded
-                let collapse_text = if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item()
-                {
-                    if app.is_notebook_collapsed(id) {
-                        "[Space] Expand"
-                    } else if app
-                        .snippet_database
-                        .notebooks
-                        .get(id)
-                        .map(|nb| !nb.children.is_empty() || nb.snippet_count > 0)
-                        .unwrap_or(false)
-                    {
-                        "[Space] Collapse"
+            match &app.code_snippets_state {
+                CodeSnippetsState::SearchSnippets => {
+                    format!(
+                        "{} [↑↓] Navigate │ [⏎] Open │ [Backspace] Edit Search │ [Esc] Back ",
+                        back_hint
+                    )
+                }
+                _ => {
+                    if app.snippet_database.notebooks.is_empty() {
+                        format!(
+                            "{} [n] New Notebook │ [/] Search │ [h] Home │ [q] Quit ",
+                            back_hint
+                        )
                     } else {
-                        "[Space] Fold"
+                        // Check if a notebook is selected and can be collapsed/expanded
+                        let collapse_text =
+                            if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
+                                if app.is_notebook_collapsed(id) {
+                                    "[Space] Expand"
+                                } else if app
+                                    .snippet_database
+                                    .notebooks
+                                    .get(id)
+                                    .map(|nb| !nb.children.is_empty() || nb.snippet_count > 0)
+                                    .unwrap_or(false)
+                                {
+                                    "[Space] Collapse"
+                                } else {
+                                    "[Space] Fold"
+                                }
+                            } else {
+                                "[Space] Fold"
+                            };
+
+                        // Add move hints based on selected item
+                        let move_hint =
+                            if let Some(TreeItem::Notebook(_, _)) = app.get_selected_item() {
+                                "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
+                            } else if let Some(TreeItem::Snippet(_, _)) = app.get_selected_item() {
+                                "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
+                            } else {
+                                ""
+                            };
+
+                        format!(
+                            "{} [n] Root │ [b] Nested │ {} │ {} │ [?] ",
+                            back_hint, collapse_text, move_hint
+                        )
                     }
-                } else {
-                    "[Space] Fold"
-                };
-
-                // Add move hints based on selected item
-                let move_hint = if let Some(TreeItem::Notebook(_, _)) = app.get_selected_item() {
-                    "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
-                } else if let Some(TreeItem::Snippet(_, _)) = app.get_selected_item() {
-                    "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
-                } else {
-                    ""
-                };
-
-                format!(
-                    "{} [n] Root │ [b] Nested │ {} │ {} │ [?] ",
-                    back_hint, collapse_text, move_hint
-                )
+                }
             }
         }
 
         // Other pages
         _ => {
             format!(
-                "{} [↑↓] Navigate │ [⏎] Select │ [h] Home │ [q] Quit ",
+                "{} [↑↓] Navigate │ [⏎] Select │ [/] Search │ [h] Home │ [q] Quit ",
                 back_hint
             )
         }
