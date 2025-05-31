@@ -180,7 +180,7 @@ impl SnippetLanguage {
             SnippetLanguage::Go => "󰟓",
             SnippetLanguage::Java => "",
             SnippetLanguage::C => "",
-            SnippetLanguage::Cpp => "",
+            SnippetLanguage::Cpp => "",
             SnippetLanguage::CSharp => "",
             SnippetLanguage::PHP => "",
             SnippetLanguage::Ruby => "",
