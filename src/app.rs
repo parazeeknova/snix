@@ -1,6 +1,6 @@
 use crate::models::{CodeSnippet, Notebook, SnippetDatabase, SnippetLanguage, StorageManager};
 use crate::ui::{code_snippets, components, start_page};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use uuid::Uuid;
 
@@ -61,7 +61,6 @@ pub enum TreeItem {
 /// to rendering functions to determine what content to display and how to
 /// style interactive elements based on the current state.
 
-#[derive(Debug)]
 pub enum ConfirmationState {
     None,
     DeleteItem {
@@ -73,6 +72,43 @@ pub enum ConfirmationState {
         is_notebook: bool,
         target_id: Uuid,
     },
+    Custom {
+        #[allow(dead_code)]
+        action: Box<dyn FnOnce(&mut App) + 'static>,
+    },
+}
+
+// Custom debug implementation since FnOnce doesn't implement Debug
+impl std::fmt::Debug for ConfirmationState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfirmationState::None => write!(f, "ConfirmationState::None"),
+            ConfirmationState::DeleteItem {
+                item_id,
+                is_notebook,
+            } => {
+                write!(
+                    f,
+                    "ConfirmationState::DeleteItem {{ item_id: {:?}, is_notebook: {:?} }}",
+                    item_id, is_notebook
+                )
+            }
+            ConfirmationState::_MoveItem {
+                item_id,
+                is_notebook,
+                target_id,
+            } => {
+                write!(
+                    f,
+                    "ConfirmationState::_MoveItem {{ item_id: {:?}, is_notebook: {:?}, target_id: {:?} }}",
+                    item_id, is_notebook, target_id
+                )
+            }
+            ConfirmationState::Custom { .. } => {
+                write!(f, "ConfirmationState::Custom {{ .. }}")
+            }
+        }
+    }
 }
 
 // Add the following enum to track different search result types
@@ -91,6 +127,32 @@ pub struct SearchResult {
     pub result_type: SearchResultType,
     pub match_context: String,
     pub parent_id: Option<Uuid>,
+}
+
+/// Struct to represent a detailed recent search entry
+#[derive(Debug, Clone)]
+pub struct RecentSearchEntry {
+    pub query: String,
+    pub timestamp: DateTime<Utc>,
+    pub result_count: usize,
+    pub last_selected_type: Option<SearchResultType>,
+    pub last_selected_id: Option<Uuid>,
+}
+
+impl RecentSearchEntry {
+    pub fn new(query: String, result_count: usize) -> Self {
+        Self {
+            query,
+            timestamp: Utc::now(),
+            result_count,
+            last_selected_type: None,
+            last_selected_id: None,
+        }
+    }
+
+    pub fn formatted_time(&self) -> String {
+        self.timestamp.format("%Y-%m-%d %H:%M").to_string()
+    }
 }
 
 /// Main Application State Container
@@ -134,6 +196,8 @@ pub struct App {
     pub notebook_color: Option<Uuid>,
     pub collapsed_notebooks: std::collections::HashSet<Uuid>,
     pub confirmation_state: ConfirmationState,
+    pub recent_searches: Vec<RecentSearchEntry>,
+    pub selected_recent_search: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +219,7 @@ pub enum InputMode {
     HelpMenu,
     EditNotebookDescription,
     SelectNotebookColor,
+    EditNotebookName,
 }
 
 impl App {
@@ -199,6 +264,8 @@ impl App {
             notebook_color: None,
             collapsed_notebooks: std::collections::HashSet::new(),
             confirmation_state: ConfirmationState::None,
+            recent_searches: Vec::new(),
+            selected_recent_search: 0,
         };
 
         app.refresh_tree_items();
@@ -864,8 +931,6 @@ impl App {
 
                             // Save to make persistent
                             let _ = self.save_database();
-
-                            // Update the tree view
                             self.refresh_tree_items();
                             self.needs_redraw = true;
                             self.set_success_message("Notebook moved down one level".to_string());
@@ -942,8 +1007,6 @@ impl App {
 
                                 // Save to make persistent
                                 let _ = self.save_database();
-
-                                // Update the tree view
                                 self.refresh_tree_items();
                                 self.needs_redraw = true;
 
@@ -1303,8 +1366,6 @@ impl App {
 
                                     // Save to make persistent
                                     let _ = self.save_database();
-
-                                    // Update the tree view
                                     self.refresh_tree_items();
                                     self.needs_redraw = true;
 
@@ -1450,7 +1511,6 @@ impl App {
                                 index - 1
                             };
 
-                            // Check if there's only one root notebook
                             if prev_index == index {
                                 self.set_error_message(
                                     "No other root notebooks available".to_string(),
@@ -1464,10 +1524,7 @@ impl App {
                             new_roots.insert(prev_index, notebook_id);
                             self.snippet_database.root_notebooks = new_roots;
 
-                            // Save to make persistent
                             let _ = self.save_database();
-
-                            // Update the tree view
                             self.refresh_tree_items();
                             self.needs_redraw = true;
 
@@ -1514,81 +1571,65 @@ impl App {
         }
     }
 
-    /// Confirm the current pending action
+    /// Confirms the pending action and executes it
     pub fn confirm_pending_action(&mut self) -> bool {
-        match self.confirmation_state {
+        // Take ownership of the confirmation state
+        let current_state =
+            std::mem::replace(&mut self.confirmation_state, ConfirmationState::None);
+
+        match current_state {
             ConfirmationState::DeleteItem {
                 item_id,
                 is_notebook,
             } => {
-                let result = if is_notebook {
-                    self.delete_notebook(item_id)
-                } else {
-                    self.delete_snippet(item_id)
-                };
+                self.clear_messages();
 
-                // Reset confirmation state
-                self.confirmation_state = ConfirmationState::None;
-
-                match result {
-                    Ok(_) => {
-                        self.set_success_message(
-                            if is_notebook {
-                                "Notebook deleted successfully"
-                            } else {
-                                "Snippet deleted successfully"
-                            }
-                            .to_string(),
-                        );
-                        true
-                    }
-                    Err(e) => {
+                if is_notebook {
+                    if let Err(e) = self.delete_notebook(item_id) {
                         self.set_error_message(e);
-                        false
+                    } else {
+                        self.set_success_message("Notebook deleted successfully".to_string());
+                        self.code_snippets_state = CodeSnippetsState::NotebookList;
+                    }
+                } else {
+                    if let Err(e) = self.delete_snippet(item_id) {
+                        self.set_error_message(e);
+                    } else {
+                        self.set_success_message("Snippet deleted successfully".to_string());
                     }
                 }
+
+                self.refresh_tree_items();
+                true
             }
             ConfirmationState::_MoveItem {
                 item_id,
                 is_notebook,
                 target_id,
             } => {
-                // Implementation depends on your existing move functions
-                let result = if is_notebook {
-                    // Call notebook move function
-                    // !TODO - one day bro one day
-                    todo!()
+                if is_notebook {
+                    // Logic for moving notebooks
+                    // TODO: Implement this someday
+                    // For now, just set an error message
+                    self.set_error_message("Moving notebooks not implemented yet".to_string());
                 } else {
-                    // Move snippet to target notebook
                     if let Some(snippet) = self.snippet_database.snippets.get_mut(&item_id) {
                         snippet.notebook_id = target_id;
-                        snippet.updated_at = chrono::Utc::now();
-                        self.save_database().map_err(|e| e.to_string())
-                    } else {
-                        Err("Snippet not found".to_string())
-                    }
-                };
 
-                self.confirmation_state = ConfirmationState::None;
-
-                match result {
-                    Ok(_) => {
-                        self.set_success_message(
-                            if is_notebook {
-                                "Notebook moved successfully"
-                            } else {
-                                "Snippet moved successfully"
-                            }
-                            .to_string(),
-                        );
-                        self.refresh_tree_items();
-                        true
-                    }
-                    Err(e) => {
-                        self.set_error_message(e);
-                        false
+                        if let Err(e) = self.save_database() {
+                            self.set_error_message(e);
+                        } else {
+                            self.set_success_message("Snippet moved successfully".to_string());
+                        }
                     }
                 }
+
+                self.refresh_tree_items();
+                true
+            }
+            ConfirmationState::Custom { action } => {
+                action(self);
+                true
             }
             ConfirmationState::None => false,
         }
@@ -1607,32 +1648,18 @@ impl App {
         crate::search::perform_search(self, query)
     }
 
-    pub fn next_search_result(&mut self) {
-        if !self.search_results.is_empty() {
-            self.selected_search_result =
-                (self.selected_search_result + 1) % self.search_results.len();
-            self.needs_redraw = true;
-        }
-    }
-
-    pub fn previous_search_result(&mut self) {
-        if !self.search_results.is_empty() {
-            self.selected_search_result = if self.selected_search_result > 0 {
-                self.selected_search_result - 1
-            } else {
-                self.search_results.len() - 1
-            };
-            self.needs_redraw = true;
-        }
-    }
-
     pub fn open_selected_search_result(&mut self) -> bool {
         crate::search::open_selected_search_result(self)
     }
 
-    pub fn clear_search(&mut self) {
-        self.search_results.clear();
-        self.selected_search_result = 0;
-        self.search_query.clear();
+    pub fn set_pending_action<F>(&mut self, message: String, action: Box<F>)
+    where
+        F: FnOnce(&mut App) + 'static,
+    {
+        self.error_message = None;
+        self.success_message = None;
+
+        self.error_message = Some(format!("{} (Enter: Confirm, Esc: Cancel)", message));
+        self.confirmation_state = ConfirmationState::Custom { action };
     }
 }

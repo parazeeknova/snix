@@ -3,7 +3,7 @@
 //! It processes all user keyboard interactions and translates them into appropriate
 //! application state changes, navigation actions, and menu interactions.
 
-use crate::app::{App, AppState, CodeSnippetsState, InputMode, TreeItem};
+use crate::app::{App, AppState, CodeSnippetsState, InputMode, RecentSearchEntry, TreeItem};
 use crate::models::SnippetLanguage;
 use crate::ui::colors::RosePine;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -103,131 +103,301 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
 
 /// Handles keyboard input for input mode in code snippets
 fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
-    match key.code {
-        KeyCode::Esc => {
-            // Close any input mode including help menu
-            app.input_mode = InputMode::Normal;
-            app.input_buffer.clear();
-            app.pending_snippet_title.clear();
-            app.clear_messages();
-            false
-        }
-        KeyCode::Enter => {
-            let input = app.input_buffer.trim().to_string();
-            app.input_buffer.clear();
+    // Special case for search mode - direct character input to search query
+    if app.input_mode == InputMode::Search {
+        match key.code {
+            KeyCode::Esc => {
+                app.input_mode = InputMode::Normal;
+                app.search_query.clear();
+                app.clear_messages();
+                app.set_success_message("Search closed".to_string());
+                false
+            }
+            KeyCode::Enter => {
+                // In search mode, Enter activates the selected result
+                if !app.search_results.is_empty() {
+                    app.open_selected_search_result();
+                    app.input_mode = InputMode::Normal;
+                    app.search_query.clear();
+                } else {
+                    app.set_success_message("No results to select".to_string());
+                }
+                false
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                // Navigate search results
+                if !app.search_results.is_empty() {
+                    if app.selected_search_result > 0 {
+                        app.selected_search_result -= 1;
+                    } else {
+                        app.selected_search_result = app.search_results.len() - 1;
+                    }
+                    app.set_success_message(format!(
+                        "Selected result {}/{}",
+                        app.selected_search_result + 1,
+                        app.search_results.len()
+                    ));
+                }
+                false
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                // Navigate search results
+                if !app.search_results.is_empty() {
+                    app.selected_search_result =
+                        (app.selected_search_result + 1) % app.search_results.len();
+                    app.set_success_message(format!(
+                        "Selected result {}/{}",
+                        app.selected_search_result + 1,
+                        app.search_results.len()
+                    ));
+                }
+                false
+            }
+            KeyCode::Char(c) => {
+                // Add character directly to search query
+                app.search_query.push(c);
 
-            match app.input_mode.clone() {
-                InputMode::CreateNotebook => {
-                    if !input.is_empty() {
-                        // Clear current_notebook_id to create a root notebook
-                        app.current_notebook_id = None;
-                        match app.create_notebook(input) {
-                            Ok(_) => {
-                                app.set_success_message(
-                                    "Notebook created successfully!".to_string(),
-                                );
-                            }
-                            Err(e) => {
-                                app.set_error_message(e);
+                // Perform search with updated query
+                let query = app.search_query.clone();
+                let count = app.perform_search(&query);
+                app.set_success_message(format!(
+                    "Found {} results for '{}'",
+                    count, app.search_query
+                ));
+                false
+            }
+            KeyCode::Backspace => {
+                // Remove last character from search query
+                if !app.search_query.is_empty() {
+                    app.search_query.pop();
+
+                    // Perform search with updated query
+                    let query = app.search_query.clone();
+                    let count = app.perform_search(&query);
+                    if !app.search_query.is_empty() {
+                        app.set_success_message(format!(
+                            "Found {} results for '{}'",
+                            count, app.search_query
+                        ));
+                    } else {
+                        app.set_success_message("Search query cleared".to_string());
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    } else {
+        // Regular input mode handling for other modes
+        match key.code {
+            KeyCode::Esc => {
+                // Close any input mode including help menu
+                app.input_mode = InputMode::Normal;
+                app.input_buffer.clear();
+                app.pending_snippet_title.clear();
+                app.clear_messages();
+                false
+            }
+            KeyCode::Enter => {
+                let input = app.input_buffer.trim().to_string();
+                app.input_buffer.clear();
+
+                match app.input_mode.clone() {
+                    InputMode::CreateNotebook => {
+                        if !input.is_empty() {
+                            // Clear current_notebook_id to create a root notebook
+                            app.current_notebook_id = None;
+                            match app.create_notebook(input) {
+                                Ok(_) => {
+                                    app.set_success_message(
+                                        "Notebook created successfully!".to_string(),
+                                    );
+                                }
+                                Err(e) => {
+                                    app.set_error_message(e);
+                                }
                             }
                         }
+                        app.input_mode = InputMode::Normal;
                     }
-                    app.input_mode = InputMode::Normal;
-                }
-                InputMode::CreateNestedNotebook => {
-                    if !input.is_empty() {
-                        // Capture the parent notebook ID temporarily for this operation
-                        let parent_id = if app.current_notebook_id.is_none() {
-                            if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
-                                Some(*id)
-                            } else if let Some(TreeItem::Snippet(snippet_id, _)) =
-                                app.get_selected_item()
-                            {
-                                // If a snippet is selected, use its notebook as parent
-                                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id)
+                    InputMode::CreateNestedNotebook => {
+                        if !input.is_empty() {
+                            // Capture the parent notebook ID temporarily for this operation
+                            let parent_id = if app.current_notebook_id.is_none() {
+                                if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
+                                    Some(*id)
+                                } else if let Some(TreeItem::Snippet(snippet_id, _)) =
+                                    app.get_selected_item()
                                 {
-                                    Some(snippet.notebook_id)
+                                    // If a snippet is selected, use its notebook as parent
+                                    if let Some(snippet) =
+                                        app.snippet_database.snippets.get(snippet_id)
+                                    {
+                                        Some(snippet.notebook_id)
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
                             } else {
-                                None
-                            }
-                        } else {
-                            app.current_notebook_id
-                        };
-
-                        // Store the parent ID temporarily
-                        app.current_notebook_id = parent_id;
-
-                        match app.create_notebook(input) {
-                            Ok(_) => {
-                                app.set_success_message(
-                                    "Nested notebook created successfully!".to_string(),
-                                );
-                            }
-                            Err(e) => {
-                                app.set_error_message(e);
-                            }
-                        }
-
-                        // Reset current_notebook_id after creating the nested notebook
-                        app.current_notebook_id = None;
-                    }
-                    app.input_mode = InputMode::Normal;
-                }
-                InputMode::CreateSnippet => {
-                    if !input.is_empty() {
-                        let (title, language) = if input.contains('.') {
-                            let parts: Vec<&str> = input.rsplitn(2, '.').collect();
-                            let extension = parts[0].to_lowercase();
-                            let title = parts[1].to_string();
-
-                            let language = match extension.as_str() {
-                                "rs" => SnippetLanguage::Rust,
-                                "js" => SnippetLanguage::JavaScript,
-                                "ts" => SnippetLanguage::TypeScript,
-                                "py" => SnippetLanguage::Python,
-                                "go" => SnippetLanguage::Go,
-                                "java" => SnippetLanguage::Java,
-                                "c" => SnippetLanguage::C,
-                                "cpp" | "cc" | "cxx" => SnippetLanguage::Cpp,
-                                "cs" => SnippetLanguage::CSharp,
-                                "php" => SnippetLanguage::PHP,
-                                "rb" => SnippetLanguage::Ruby,
-                                "swift" => SnippetLanguage::Swift,
-                                "kt" => SnippetLanguage::Kotlin,
-                                "dart" => SnippetLanguage::Dart,
-                                "html" => SnippetLanguage::HTML,
-                                "css" => SnippetLanguage::CSS,
-                                "scss" => SnippetLanguage::SCSS,
-                                "sql" => SnippetLanguage::SQL,
-                                "sh" | "bash" => SnippetLanguage::Bash,
-                                "ps1" => SnippetLanguage::PowerShell,
-                                "yml" | "yaml" => SnippetLanguage::Yaml,
-                                "json" => SnippetLanguage::Json,
-                                "xml" => SnippetLanguage::Xml,
-                                "md" => SnippetLanguage::Markdown,
-                                "dockerfile" => SnippetLanguage::Dockerfile,
-                                "toml" => SnippetLanguage::Toml,
-                                "ini" => SnippetLanguage::Ini,
-                                "conf" | "config" => SnippetLanguage::Config,
-                                _ => SnippetLanguage::Text,
+                                app.current_notebook_id
                             };
 
-                            (title, language)
-                        } else {
-                            (input, SnippetLanguage::Text)
-                        };
+                            // Store the parent ID temporarily
+                            app.current_notebook_id = parent_id;
 
-                        if let Some(notebook_id) = get_current_notebook_id(app) {
-                            match app.create_snippet(title, language, notebook_id) {
-                                Ok(_snippet_id) => {
+                            match app.create_notebook(input) {
+                                Ok(_) => {
                                     app.set_success_message(
-                                        "Snippet created successfully!".to_string(),
+                                        "Nested notebook created successfully!".to_string(),
                                     );
-                                    app.code_snippets_state = CodeSnippetsState::NotebookList;
-                                    app.refresh_tree_items();
+                                }
+                                Err(e) => {
+                                    app.set_error_message(e);
+                                }
+                            }
+
+                            // Reset current_notebook_id after creating the nested notebook
+                            app.current_notebook_id = None;
+                        }
+                        app.input_mode = InputMode::Normal;
+                    }
+                    InputMode::CreateSnippet => {
+                        if !input.is_empty() {
+                            let (title, language) = if input.contains('.') {
+                                let parts: Vec<&str> = input.rsplitn(2, '.').collect();
+                                let extension = parts[0].to_lowercase();
+                                let title = parts[1].to_string();
+
+                                let language = match extension.as_str() {
+                                    "rs" => SnippetLanguage::Rust,
+                                    "js" => SnippetLanguage::JavaScript,
+                                    "ts" => SnippetLanguage::TypeScript,
+                                    "py" => SnippetLanguage::Python,
+                                    "go" => SnippetLanguage::Go,
+                                    "java" => SnippetLanguage::Java,
+                                    "c" => SnippetLanguage::C,
+                                    "cpp" | "cc" | "cxx" => SnippetLanguage::Cpp,
+                                    "cs" => SnippetLanguage::CSharp,
+                                    "php" => SnippetLanguage::PHP,
+                                    "rb" => SnippetLanguage::Ruby,
+                                    "swift" => SnippetLanguage::Swift,
+                                    "kt" => SnippetLanguage::Kotlin,
+                                    "dart" => SnippetLanguage::Dart,
+                                    "html" => SnippetLanguage::HTML,
+                                    "css" => SnippetLanguage::CSS,
+                                    "scss" => SnippetLanguage::SCSS,
+                                    "sql" => SnippetLanguage::SQL,
+                                    "sh" | "bash" => SnippetLanguage::Bash,
+                                    "ps1" => SnippetLanguage::PowerShell,
+                                    "yml" | "yaml" => SnippetLanguage::Yaml,
+                                    "json" => SnippetLanguage::Json,
+                                    "xml" => SnippetLanguage::Xml,
+                                    "md" => SnippetLanguage::Markdown,
+                                    "dockerfile" => SnippetLanguage::Dockerfile,
+                                    "toml" => SnippetLanguage::Toml,
+                                    "ini" => SnippetLanguage::Ini,
+                                    "conf" | "config" => SnippetLanguage::Config,
+                                    _ => SnippetLanguage::Text,
+                                };
+
+                                (title, language)
+                            } else {
+                                (input, SnippetLanguage::Text)
+                            };
+
+                            if let Some(notebook_id) = get_current_notebook_id(app) {
+                                match app.create_snippet(title, language, notebook_id) {
+                                    Ok(_snippet_id) => {
+                                        app.set_success_message(
+                                            "Snippet created successfully!".to_string(),
+                                        );
+                                        app.code_snippets_state = CodeSnippetsState::NotebookList;
+                                        app.refresh_tree_items();
+                                    }
+                                    Err(e) => {
+                                        app.set_error_message(e);
+                                    }
+                                }
+                            } else {
+                                app.set_error_message("No notebook selected".to_string());
+                            }
+
+                            app.input_mode = InputMode::Normal;
+                        } else {
+                            app.input_mode = InputMode::Normal;
+                            app.code_snippets_state = CodeSnippetsState::NotebookList;
+                            app.clear_messages();
+                        }
+                    }
+                    InputMode::SelectLanguage => {
+                        // This shouldn't happen with Enter, language selection uses different keys
+                        app.input_mode = InputMode::Normal;
+                        app.pending_snippet_title.clear();
+                        app.clear_messages();
+
+                        app.code_snippets_state = CodeSnippetsState::NotebookList;
+                    }
+                    InputMode::Search => {
+                        // When Enter is pressed in search input mode, treat it as confirmation
+                        if input.is_empty() {
+                            // Empty search - go back to normal mode
+                            app.input_mode = InputMode::Normal;
+                            app.search_query.clear();
+                            app.search_results.clear();
+                            app.selected_search_result = 0;
+                            app.set_success_message("Search canceled".to_string());
+                            return false;
+                        }
+
+                        // Set the search query from input buffer
+                        app.search_query = input;
+
+                        // Perform the search with the entered query
+                        let query = app.search_query.clone();
+                        let count = app.perform_search(&query);
+
+                        if count == 0 {
+                            app.set_success_message(format!(
+                                "No results found for '{}'",
+                                app.search_query
+                            ));
+                        } else {
+                            app.set_success_message(format!(
+                                "Found {} results for '{}'. Use ↑/↓ to navigate.",
+                                count, app.search_query
+                            ));
+                        }
+
+                        // Redirect to handle_search_keys for future key presses
+                        // but stay in Search mode to allow navigation
+                    }
+                    InputMode::EditSnippetDescription => {
+                        if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                            match app.update_snippet_description(*snippet_id, input) {
+                                Ok(_) => {
+                                    app.set_success_message(
+                                        "Description updated successfully".to_string(),
+                                    );
+                                }
+                                Err(e) => {
+                                    app.set_error_message(e);
+                                }
+                            }
+                        } else {
+                            app.set_error_message("Snippet selection lost".to_string());
+                        }
+                        app.input_mode = InputMode::Normal;
+                        app.pending_snippet_title.clear();
+                    }
+                    InputMode::EditNotebookDescription => {
+                        if let Some(notebook_id) = app.current_notebook_id {
+                            match app.update_notebook_description(notebook_id, input) {
+                                Ok(_) => {
+                                    app.set_success_message(
+                                        "Notebook description updated successfully".to_string(),
+                                    );
                                 }
                                 Err(e) => {
                                     app.set_error_message(e);
@@ -236,114 +406,47 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                         } else {
                             app.set_error_message("No notebook selected".to_string());
                         }
-
                         app.input_mode = InputMode::Normal;
-                    } else {
+                    }
+                    InputMode::SelectNotebookColor => {
                         app.input_mode = InputMode::Normal;
-                        app.code_snippets_state = CodeSnippetsState::NotebookList;
+                    }
+                    _ => {
+                        app.input_mode = InputMode::Normal;
                         app.clear_messages();
                     }
                 }
-                InputMode::SelectLanguage => {
-                    // This shouldn't happen with Enter, language selection uses different keys
-                    app.input_mode = InputMode::Normal;
-                    app.pending_snippet_title.clear();
-                    app.clear_messages();
-
-                    app.code_snippets_state = CodeSnippetsState::NotebookList;
-                }
-                InputMode::Search => {
-                    app.search_query = input;
-                    app.input_mode = InputMode::Normal;
-                    app.code_snippets_state = CodeSnippetsState::SearchSnippets;
-
-                    // Perform the initial search - fix borrow checker issue by cloning search_query
-                    let query = app.search_query.clone();
-                    let count = app.perform_search(&query);
-
-                    if count == 0 && !app.search_query.is_empty() {
-                        app.set_success_message(format!(
-                            "No results found for '{}'",
-                            app.search_query
-                        ));
-                    } else if count > 0 {
-                        app.set_success_message(format!("Found {} results", count));
-                    }
-
-                    app.clear_messages();
-                }
-                InputMode::EditSnippetDescription => {
-                    if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
-                        match app.update_snippet_description(*snippet_id, input) {
-                            Ok(_) => {
-                                app.set_success_message(
-                                    "Description updated successfully".to_string(),
-                                );
-                            }
-                            Err(e) => {
-                                app.set_error_message(e);
-                            }
-                        }
-                    } else {
-                        app.set_error_message("Snippet selection lost".to_string());
-                    }
-                    app.input_mode = InputMode::Normal;
-                    app.pending_snippet_title.clear();
-                }
-                InputMode::EditNotebookDescription => {
-                    if let Some(notebook_id) = app.current_notebook_id {
-                        match app.update_notebook_description(notebook_id, input) {
-                            Ok(_) => {
-                                app.set_success_message(
-                                    "Notebook description updated successfully".to_string(),
-                                );
-                            }
-                            Err(e) => {
-                                app.set_error_message(e);
-                            }
-                        }
-                    } else {
-                        app.set_error_message("No notebook selected".to_string());
-                    }
-                    app.input_mode = InputMode::Normal;
-                }
-                InputMode::SelectNotebookColor => {
-                    app.input_mode = InputMode::Normal;
-                }
-                _ => {
-                    app.input_mode = InputMode::Normal;
-                    app.clear_messages();
-                }
+                false
             }
-            false
-        }
-        KeyCode::Backspace => {
-            if !app.input_buffer.is_empty() {
-                app.input_buffer.pop();
+            KeyCode::Backspace => {
+                if !app.input_buffer.is_empty() {
+                    app.input_buffer.pop();
+                }
+                false
             }
-            false
-        }
-        KeyCode::Up | KeyCode::Char('k') if app.input_mode == InputMode::SelectLanguage => {
-            app.selected_language = if app.selected_language == 0 {
-                get_available_languages().len() - 1
-            } else {
-                app.selected_language - 1
-            };
-            false
-        }
-        KeyCode::Down | KeyCode::Char('j') if app.input_mode == InputMode::SelectLanguage => {
-            app.selected_language = (app.selected_language + 1) % get_available_languages().len();
-            false
-        }
-        KeyCode::Char(c) => {
-            if app.input_mode != InputMode::SelectLanguage
-                && app.input_mode != InputMode::SelectNotebookColor
-            {
-                app.input_buffer.push(c);
+            KeyCode::Up | KeyCode::Char('k') if app.input_mode == InputMode::SelectLanguage => {
+                app.selected_language = if app.selected_language == 0 {
+                    get_available_languages().len() - 1
+                } else {
+                    app.selected_language - 1
+                };
+                false
             }
-            false
+            KeyCode::Down | KeyCode::Char('j') if app.input_mode == InputMode::SelectLanguage => {
+                app.selected_language =
+                    (app.selected_language + 1) % get_available_languages().len();
+                false
+            }
+            KeyCode::Char(c) => {
+                if app.input_mode != InputMode::SelectLanguage
+                    && app.input_mode != InputMode::SelectNotebookColor
+                {
+                    app.input_buffer.push(c);
+                }
+                false
+            }
+            _ => false,
         }
-        _ => false,
     }
 }
 
@@ -413,7 +516,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                 app.cancel_pending_action();
                 return false;
             }
-            _ => return false, // Ignore other keys during confirmation
+            _ => return false,
         }
     }
 
@@ -436,6 +539,11 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             }
             _ => {}
         }
+    }
+
+    // If search mode is active, handle search keys
+    if app.input_mode == InputMode::Search {
+        return handle_search_keys(key, app);
     }
 
     match key.code {
@@ -505,7 +613,6 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                     TreeItem::Notebook(notebook_id, _) => {
                         app.current_notebook_id = Some(notebook_id);
 
-                        // Always go to the details view when selecting a notebook
                         app.code_snippets_state =
                             CodeSnippetsState::NotebookDetails { notebook_id };
                     }
@@ -518,6 +625,20 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                     }
                 }
             }
+            false
+        }
+
+        // Activate search mode with '/'
+        KeyCode::Char('/') => {
+            app.clear_messages();
+            app.input_mode = InputMode::Search;
+            app.search_query.clear();
+            app.input_buffer.clear();
+            app.search_results.clear();
+            app.selected_search_result = 0;
+            app.selected_recent_search = 0;
+            app.needs_redraw = true;
+            app.set_success_message("Search mode activated. Type to search...".to_string());
             false
         }
 
@@ -632,14 +753,6 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             } else {
                 app.set_error_message("No item selected".to_string());
             }
-            false
-        }
-
-        // Search snippets
-        KeyCode::Char('/') => {
-            app.clear_messages();
-            app.input_mode = InputMode::Search;
-            app.input_buffer.clear();
             false
         }
 
@@ -796,12 +909,31 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 
 /// Handles keys for notebook view
 fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::Uuid) -> bool {
+    // If search mode is active, handle search keys
+    if app.input_mode == InputMode::Search {
+        return handle_search_keys(key, app);
+    }
+
     match key.code {
         KeyCode::Esc => {
             app.code_snippets_state = CodeSnippetsState::NotebookList;
-            app.current_notebook_id = None;
             false
         }
+
+        // Activate search mode with '/'
+        KeyCode::Char('/') => {
+            app.clear_messages();
+            app.input_mode = InputMode::Search;
+            app.search_query.clear();
+            app.input_buffer.clear();
+            app.search_results.clear();
+            app.selected_search_result = 0;
+            app.selected_recent_search = 0;
+            app.needs_redraw = true;
+            app.set_success_message("Search mode activated. Type to search...".to_string());
+            false
+        }
+
         _ => false,
     }
 }
@@ -822,29 +954,108 @@ fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, _snippet_id: uuid::U
 fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         KeyCode::Esc => {
-            app.clear_search();
-            app.code_snippets_state = CodeSnippetsState::NotebookList;
+            // Clear the search query when closing search
+            app.input_mode = InputMode::Normal;
+
+            // Save to recent searches only if not empty
+            if !app.search_query.is_empty() {
+                // Save with count = 0 if not already stored
+                let query = app.search_query.clone();
+                let result_count = app.search_results.len();
+                if !app.recent_searches.iter().any(|entry| entry.query == query) {
+                    let entry = RecentSearchEntry::new(query, result_count);
+                    app.recent_searches.insert(0, entry);
+                    // Limit to 10 recent searches
+                    if app.recent_searches.len() > 10 {
+                        app.recent_searches.pop();
+                    }
+                }
+            }
+
+            // Clear search query when closing
+            app.search_query.clear();
+            app.search_results.clear();
+            app.selected_search_result = 0;
+            app.selected_recent_search = 0;
             app.clear_messages();
             false
         }
 
-        // Navigation of search results
+        // Navigation of search results - simplified to always work
         KeyCode::Up | KeyCode::Char('k') => {
-            app.previous_search_result();
+            if !app.search_results.is_empty() {
+                // Always navigate results if we have them
+                if app.selected_search_result > 0 {
+                    app.selected_search_result -= 1;
+                } else {
+                    app.selected_search_result = app.search_results.len() - 1;
+                }
+                app.set_success_message(format!(
+                    "Selected result {}/{}",
+                    app.selected_search_result + 1,
+                    app.search_results.len()
+                ));
+            } else if !app.recent_searches.is_empty() && app.search_query.is_empty() {
+                // Navigate recent searches if no results and no query
+                if app.selected_recent_search > 0 {
+                    app.selected_recent_search -= 1;
+                } else {
+                    app.selected_recent_search = app.recent_searches.len() - 1;
+                }
+            }
+            app.needs_redraw = true;
             false
         }
 
         KeyCode::Down | KeyCode::Char('j') => {
-            app.next_search_result();
+            if !app.search_results.is_empty() {
+                // Always navigate results if we have them
+                app.selected_search_result =
+                    (app.selected_search_result + 1) % app.search_results.len();
+                app.set_success_message(format!(
+                    "Selected result {}/{}",
+                    app.selected_search_result + 1,
+                    app.search_results.len()
+                ));
+            } else if !app.recent_searches.is_empty() && app.search_query.is_empty() {
+                // Navigate recent searches if no results and no query
+                app.selected_recent_search =
+                    (app.selected_recent_search + 1) % app.recent_searches.len();
+            }
+            app.needs_redraw = true;
             false
         }
 
-        // Open selected result
+        // Open selected result or use selected recent search
         KeyCode::Enter => {
-            if app.open_selected_search_result() {
-                // If successful, the application state may have changed
-                // Don't do anything else - the app state handles the transition
+            if !app.search_results.is_empty() {
+                if app.open_selected_search_result() {
+                    // If successful, the application state may have changed
+                    app.input_mode = InputMode::Normal;
+
+                    // Clear search state
+                    app.search_query.clear();
+                    app.search_results.clear();
+                    app.selected_search_result = 0;
+                    app.selected_recent_search = 0;
+                } else {
+                    app.set_success_message("Failed to open selected result".to_string());
+                }
+            } else if !app.recent_searches.is_empty() && app.search_query.is_empty() {
+                // Use selected recent search
+                if let Some(entry) = app.recent_searches.get(app.selected_recent_search) {
+                    app.search_query = entry.query.clone();
+                    let query = app.search_query.clone();
+                    let count = app.perform_search(&query);
+                    app.set_success_message(format!(
+                        "Re-running search '{}' - found {} results",
+                        query, count
+                    ));
+                }
+            } else {
+                app.set_success_message("No search results to select".to_string());
             }
+            app.needs_redraw = true;
             false
         }
 
@@ -852,7 +1063,8 @@ fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
         KeyCode::Char(c) => {
             app.search_query.push(c);
             let query = app.search_query.clone();
-            let _count = app.perform_search(&query);
+            let count = app.perform_search(&query);
+            app.set_success_message(format!("Found {} results for '{}'", count, query));
             app.needs_redraw = true;
             false
         }
@@ -860,10 +1072,17 @@ fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
         KeyCode::Backspace => {
             if !app.search_query.is_empty() {
                 app.search_query.pop();
-                let query = app.search_query.clone();
-                let _count = app.perform_search(&query);
-                app.needs_redraw = true;
+                if app.search_query.is_empty() {
+                    app.search_results.clear();
+                    app.selected_search_result = 0;
+                    app.set_success_message("Type to search".to_string());
+                } else {
+                    let query = app.search_query.clone();
+                    let count = app.perform_search(&query);
+                    app.set_success_message(format!("Found {} results for '{}'", count, query));
+                }
             }
+            app.needs_redraw = true;
             false
         }
 
@@ -1013,7 +1232,7 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
     print!("\x1B[?1049h"); // Ensure alternate screen buffer is active
     print!("\x1B[?25l"); // Hide cursor
     print!("\x1B[2J"); // Clear screen
-    print!("\x1B[H"); // Move cursor to home
+    print!("\x1B[H"); // Move cursor to home position
     stdout().flush()?;
 
     Ok(())
@@ -1207,59 +1426,105 @@ fn handle_other_page_keys(key: KeyEvent, app: &mut App) -> bool {
 }
 
 fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid::Uuid) -> bool {
+    // If search mode is active, handle search keys
+    if app.input_mode == InputMode::Search {
+        return handle_search_keys(key, app);
+    }
+
+    // Check if we have a pending confirmation
+    if app.has_pending_action() {
+        match key.code {
+            KeyCode::Enter => {
+                app.confirm_pending_action();
+                return false;
+            }
+            KeyCode::Esc => {
+                app.cancel_pending_action();
+                return false;
+            }
+            _ => return false,
+        }
+    }
+
     match key.code {
         KeyCode::Esc => {
             app.code_snippets_state = CodeSnippetsState::NotebookList;
-            app.current_notebook_id = None;
-            false
-        }
-
-        KeyCode::Char('s') | KeyCode::Char('S') => {
             app.clear_messages();
-            app.input_mode = InputMode::CreateSnippet;
-            app.input_buffer.clear();
-            app.code_snippets_state = CodeSnippetsState::CreateSnippet { notebook_id };
             false
         }
 
-        // Edit notebook description
         KeyCode::Char('e') | KeyCode::Char('E') => {
-            app.clear_messages();
+            // Edit notebook name
             if let Some(notebook) = app.snippet_database.notebooks.get(&notebook_id) {
-                app.input_mode = InputMode::EditNotebookDescription;
-                let desc = notebook.description.clone().unwrap_or_default();
-                let desc_without_color = if desc.starts_with("[COLOR:") {
-                    if let Some(end_idx) = desc.find(']') {
-                        desc[end_idx + 1..].trim().to_string()
-                    } else {
-                        desc
-                    }
-                } else {
-                    desc
-                };
-                app.input_buffer = desc_without_color;
-            } else {
-                app.set_error_message("Notebook not found".to_string());
+                app.input_buffer = notebook.name.clone();
+                app.input_mode = InputMode::EditNotebookName;
+                app.current_notebook_id = Some(notebook_id);
             }
             false
         }
 
-        // Change notebook color
-        KeyCode::Char('c') | KeyCode::Char('C') => {
-            app.clear_messages();
-            app.input_mode = InputMode::SelectNotebookColor;
-            app.selected_language = app.get_notebook_color(&notebook_id);
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            // Edit notebook description
+            if let Some(notebook) = app.snippet_database.notebooks.get(&notebook_id) {
+                app.input_buffer = notebook.description.clone().unwrap_or_default();
+                app.input_mode = InputMode::EditNotebookDescription;
+                app.current_notebook_id = Some(notebook_id);
+            }
             false
         }
 
-        KeyCode::PageUp => {
-            app.content_scroll_position = app.content_scroll_position.saturating_sub(5);
-            app.needs_redraw = true;
+        KeyCode::Char('c') | KeyCode::Char('C') => {
+            // Change notebook color
+            app.input_mode = InputMode::SelectNotebookColor;
+            app.current_notebook_id = Some(notebook_id);
             false
         }
-        KeyCode::PageDown => {
-            app.content_scroll_position = app.content_scroll_position.saturating_add(5);
+
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            // Create snippet in this notebook
+            app.code_snippets_state = CodeSnippetsState::CreateSnippet { notebook_id };
+            app.input_mode = InputMode::CreateSnippet;
+            app.input_buffer.clear();
+            false
+        }
+
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            // Delete notebook with confirmation
+            let notebook_name = app
+                .snippet_database
+                .notebooks
+                .get(&notebook_id)
+                .map(|n| n.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            app.set_pending_action(
+                format!(
+                    "Delete notebook \"{}\" and all its snippets?",
+                    notebook_name
+                ),
+                Box::new(move |app: &mut App| {
+                    if let Err(e) = app.delete_notebook(notebook_id) {
+                        app.set_error_message(e);
+                    } else {
+                        app.set_success_message(format!("Notebook \"{}\" deleted", notebook_name));
+                        app.code_snippets_state = CodeSnippetsState::NotebookList;
+                    }
+                }),
+            );
+            false
+        }
+
+        // Activate search mode with '/'
+        KeyCode::Char('/') => {
+            app.clear_messages();
+            app.input_mode = InputMode::Search;
+            app.search_query.clear();
+            app.input_buffer.clear();
+            app.search_results.clear();
+            app.selected_search_result = 0;
+            app.selected_recent_search = 0;
             app.needs_redraw = true;
+            app.set_success_message("Search mode activated. Type to search...".to_string());
             false
         }
 
