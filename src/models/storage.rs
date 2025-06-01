@@ -1,4 +1,4 @@
-use crate::models::{CodeSnippet, Notebook};
+use crate::models::{CodeSnippet, Notebook, TagManager};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,6 +30,7 @@ pub struct StorageManager {
     snippets_dir: PathBuf,
     _notebooks_dir: PathBuf,
     database_file: PathBuf,
+    tag_manager_file: PathBuf,
 }
 
 impl StorageManager {
@@ -39,6 +40,7 @@ impl StorageManager {
             .join("snix");
 
         let db_file = data_dir.join("database.json");
+        let tags_file = data_dir.join("tags.json");
         let snippets_dir = data_dir.join("snippets");
 
         // Create directories if they don't exist
@@ -50,6 +52,7 @@ impl StorageManager {
             snippets_dir,
             _notebooks_dir: data_dir,
             database_file: db_file,
+            tag_manager_file: tags_file,
         })
     }
 
@@ -68,6 +71,24 @@ impl StorageManager {
         let content = serde_json::to_string_pretty(db).context("Failed to serialize database")?;
 
         fs::write(&self.database_file, content).context("Failed to write database file")
+    }
+
+    pub fn load_tag_manager(&self) -> Result<TagManager> {
+        if !self.tag_manager_file.exists() {
+            return Ok(TagManager::default());
+        }
+
+        let content = fs::read_to_string(&self.tag_manager_file)
+            .context("Failed to read tag manager file")?;
+
+        serde_json::from_str(&content).context("Failed to parse tag manager JSON")
+    }
+
+    pub fn save_tag_manager(&self, tag_manager: &TagManager) -> Result<()> {
+        let content =
+            serde_json::to_string_pretty(tag_manager).context("Failed to serialize tag manager")?;
+
+        fs::write(&self.tag_manager_file, content).context("Failed to write tag manager file")
     }
 
     pub fn save_snippet_content(&self, snippet: &CodeSnippet) -> Result<()> {

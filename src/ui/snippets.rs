@@ -1,3 +1,4 @@
+// This is a earlier implementation of syntax highlighting it will soon be removed in future refactor if any..
 fn get_bat_highlighted_content(snippet: &CodeSnippet, app: &App) -> Option<String> {
     if let Some(ref storage) = app.storage_manager {
         let file_path = storage.get_snippet_file_path(snippet);

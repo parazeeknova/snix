@@ -411,6 +411,45 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     InputMode::SelectNotebookColor => {
                         app.input_mode = InputMode::Normal;
                     }
+                    InputMode::EditTags => {
+                        // Handle Enter to save tags
+                        let input_text = input.clone();
+
+                        // First get the snippet ID without borrowing
+                        let snippet_id_opt =
+                            if let Some(TreeItem::Snippet(id, _)) = app.get_selected_item() {
+                                Some(*id)
+                            } else {
+                                None
+                            };
+
+                        // Now process with the ID without holding a borrow across function calls
+                        if let Some(snippet_id) = snippet_id_opt {
+                            // First update the snippet
+                            if let Some(snippet) =
+                                app.snippet_database.snippets.get_mut(&snippet_id)
+                            {
+                                // Clear existing tags before setting new ones
+                                snippet.tags.clear();
+                                snippet.set_tags_from_text(&input_text);
+
+                                // Get a copy of the tags to avoid borrowing issues
+                                let tags: Vec<String> = snippet.tags.clone();
+
+                                // Now update the tag manager with the cloned tags
+                                for tag_name in tags {
+                                    app.tag_manager.add_tag_to_snippet(snippet_id, tag_name);
+                                }
+
+                                app.set_success_message("Tags updated".to_string());
+                            } else {
+                                app.set_error_message("Snippet not found".to_string());
+                            }
+                        }
+
+                        // Always return to normal mode even if no snippet was found
+                        app.input_mode = InputMode::Normal;
+                    }
                     _ => {
                         app.input_mode = InputMode::Normal;
                         app.clear_messages();
@@ -899,6 +938,26 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             app.clear_messages();
             if app.move_item_to_prev_sibling() {
                 app.needs_redraw = true;
+            }
+            false
+        }
+
+        // Add tag editing functionality
+        KeyCode::Char('t') => {
+            app.clear_messages();
+
+            if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                    // Set input buffer to current tags
+                    app.input_buffer = snippet.get_tags_display_string();
+                    app.input_mode = InputMode::EditTags;
+                    // Clear any messages to ensure the full tag editing UI is visible
+                    app.clear_messages();
+                } else {
+                    app.set_error_message("Snippet not found".to_string());
+                }
+            } else {
+                app.set_error_message("Select a snippet first".to_string());
             }
             false
         }

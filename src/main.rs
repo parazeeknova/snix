@@ -68,7 +68,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, Box<dyn Error>> {
     println!("Starting snix - Template & Boilerplate Manager");
     println!("Created by parazeeknova");
-    println!("Loading...");
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

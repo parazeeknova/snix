@@ -1,4 +1,5 @@
-use crate::models::{CodeSnippet, Notebook, SnippetDatabase, SnippetLanguage, StorageManager};
+use crate::models::storage::SnippetDatabase;
+use crate::models::{CodeSnippet, Notebook, SnippetLanguage, StorageManager, TagManager};
 use crate::ui::{code_snippets, components, start_page};
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
@@ -198,6 +199,7 @@ pub struct App {
     pub confirmation_state: ConfirmationState,
     pub recent_searches: Vec<RecentSearchEntry>,
     pub selected_recent_search: usize,
+    pub tag_manager: TagManager,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -220,6 +222,7 @@ pub enum InputMode {
     EditNotebookDescription,
     SelectNotebookColor,
     EditNotebookName,
+    EditTags,
 }
 
 impl App {
@@ -234,6 +237,13 @@ impl App {
             manager.load_database().unwrap_or_default()
         } else {
             SnippetDatabase::default()
+        };
+
+        // Initialize and load the tag manager
+        let tag_manager = if let Some(ref manager) = storage_manager {
+            manager.load_tag_manager().unwrap_or_default()
+        } else {
+            TagManager::new()
         };
 
         let mut app = Self {
@@ -266,6 +276,7 @@ impl App {
             confirmation_state: ConfirmationState::None,
             recent_searches: Vec::new(),
             selected_recent_search: 0,
+            tag_manager,
         };
 
         app.refresh_tree_items();
@@ -551,36 +562,56 @@ impl App {
     }
 
     pub fn delete_snippet(&mut self, snippet_id: Uuid) -> Result<(), String> {
-        if let Some(snippet) = self.snippet_database.snippets.remove(&snippet_id) {
-            if let Some(ref storage) = self.storage_manager {
-                if let Err(e) = storage.delete_snippet_file(&snippet) {
-                    eprintln!("Warning: Failed to delete snippet file: {}", e);
+        // Check if the snippet exists
+        if !self.snippet_database.snippets.contains_key(&snippet_id) {
+            return Err("Snippet not found".to_string());
+        }
+
+        // Get the notebook ID before we remove the snippet
+        let notebook_id = self
+            .snippet_database
+            .snippets
+            .get(&snippet_id)
+            .map(|s| s.notebook_id);
+
+        // Delete the snippet file (if storage is available)
+        if let Some(ref storage) = self.storage_manager {
+            if let Some(snippet) = self.snippet_database.snippets.get(&snippet_id) {
+                if let Err(e) = storage.delete_snippet_file(snippet) {
+                    return Err(format!("Failed to delete snippet file: {}", e));
                 }
             }
-
-            if let Some(notebook) = self
-                .snippet_database
-                .notebooks
-                .get_mut(&snippet.notebook_id)
-            {
-                notebook.update_snippet_count(
-                    self.snippet_database
-                        .snippets
-                        .values()
-                        .filter(|s| s.notebook_id == snippet.notebook_id)
-                        .count(),
-                );
-            }
-
-            if let Err(e) = self.save_database() {
-                return Err(format!("Failed to save changes: {}", e));
-            }
-
-            self.refresh_tree_items();
-            Ok(())
-        } else {
-            Err("Snippet not found".to_string())
         }
+
+        // Clean up any tag associations for this snippet
+        self.tag_manager.handle_snippet_deleted(&snippet_id);
+
+        // Remove the snippet from the database
+        self.snippet_database.snippets.remove(&snippet_id);
+
+        // Decrease the snippet count in the parent notebook
+        if let Some(id) = notebook_id {
+            if let Some(notebook) = self.snippet_database.notebooks.get_mut(&id) {
+                notebook.snippet_count = notebook.snippet_count.saturating_sub(1);
+                notebook.updated_at = chrono::Utc::now();
+            }
+        }
+
+        // Save the updated database
+        if let Err(e) = self.save_database() {
+            return Err(format!(
+                "Failed to save database after snippet deletion: {}",
+                e
+            ));
+        }
+
+        // Refresh tree items to reflect the change
+        self.refresh_tree_items();
+        self.selected_tree_item = self
+            .selected_tree_item
+            .min(self.tree_items.len().saturating_sub(1));
+
+        Ok(())
     }
 
     pub fn get_selected_item(&self) -> Option<&TreeItem> {
@@ -597,12 +628,18 @@ impl App {
 
     pub fn save_database(&self) -> Result<(), String> {
         if let Some(ref storage) = self.storage_manager {
-            storage
-                .save_database(&self.snippet_database)
-                .map_err(|e| e.to_string())
+            if let Err(e) = storage.save_database(&self.snippet_database) {
+                return Err(format!("Failed to save database: {}", e));
+            }
+
+            // Also save the tag manager as a separate file
+            if let Err(e) = storage.save_tag_manager(&self.tag_manager) {
+                return Err(format!("Failed to save tags: {}", e));
+            }
         } else {
-            Err("Storage manager not available".to_string())
+            return Err("No storage manager available".to_string());
         }
+        Ok(())
     }
 
     pub fn set_error_message(&mut self, message: String) {

@@ -9,7 +9,7 @@ use ratatui::{
     style::{Style, Stylize},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Widget, Wrap,
     },
 };
@@ -182,6 +182,9 @@ fn render_overlays(frame: &mut Frame, area: Rect, app: &mut App) {
             } else if let Some(ref message) = app.success_message {
                 render_message_overlay(frame, area, message, false);
             }
+        }
+        InputMode::EditTags => {
+            render_tags_editing(frame, app);
         }
     }
 }
@@ -1172,9 +1175,16 @@ fn render_snippet_preview(
         .borders(ratatui::widgets::Borders::NONE);
     bg_block.render(area, frame.buffer_mut());
 
-    let chunks = Layout::vertical([Constraint::Length(10), Constraint::Fill(1)]).split(area);
+    let main_chunks = Layout::vertical([Constraint::Length(14), Constraint::Fill(1)]).split(area);
 
-    // Snippet info
+    // Split the top info area into sections: basic metadata and description/tags
+    let top_chunks = Layout::vertical([
+        Constraint::Length(8), // Basic metadata
+        Constraint::Length(6), // Description and tags side by side (reduced height)
+    ])
+    .split(main_chunks[0]);
+
+    // Basic metadata
     let info_lines = vec![
         Line::from(vec![
             Span::styled(snippet.language.icon(), Style::default().fg(RosePine::GOLD)),
@@ -1217,18 +1227,85 @@ fn render_snippet_preview(
                 Style::default().fg(RosePine::TEXT),
             ),
         ]),
-        Line::from(""),
-        Line::from(if let Some(desc) = &snippet.description {
-            desc.clone()
-        } else {
-            "No description".to_string()
-        })
-        .style(Style::default().fg(RosePine::SUBTLE)),
     ];
 
     let info_paragraph = Paragraph::new(info_lines).wrap(Wrap { trim: true });
+    info_paragraph.render(top_chunks[0], frame.buffer_mut());
 
-    info_paragraph.render(chunks[0], frame.buffer_mut());
+    // Split the description/tags area into two columns
+    let detail_chunks = Layout::horizontal([
+        Constraint::Percentage(60), // Description (left)
+        Constraint::Percentage(40), // Tags (right)
+    ])
+    .split(top_chunks[1]);
+
+    let desc_block = Block::default()
+        .title("  Description ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE));
+
+    frame.render_widget(desc_block, detail_chunks[0]);
+
+    let desc_inner = Rect {
+        x: detail_chunks[0].x + 1,
+        y: detail_chunks[0].y + 1,
+        width: detail_chunks[0].width.saturating_sub(2),
+        height: detail_chunks[0].height.saturating_sub(2),
+    };
+
+    let bg_block = Block::default()
+        .style(Style::default().bg(RosePine::SURFACE))
+        .borders(Borders::NONE);
+    frame.render_widget(bg_block, desc_inner);
+
+    let desc_text = if let Some(desc) = &snippet.description {
+        if desc.trim().is_empty() {
+            "No description. Press 'd' to add a  description.".to_string()
+        } else {
+            desc.clone()
+        }
+    } else {
+        "No description. Press 'd' to add a description.".to_string()
+    };
+
+    let desc_paragraph = Paragraph::new(desc_text)
+        .style(Style::default().fg(RosePine::SUBTLE))
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(desc_paragraph, desc_inner);
+
+    let tags_block = Block::default()
+        .title(" 󰓹 Tags ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE));
+
+    frame.render_widget(tags_block, detail_chunks[1]);
+
+    let tags_inner = Rect {
+        x: detail_chunks[1].x + 1,
+        y: detail_chunks[1].y + 1,
+        width: detail_chunks[1].width.saturating_sub(2),
+        height: detail_chunks[1].height.saturating_sub(2),
+    };
+
+    let bg_block = Block::default()
+        .style(Style::default().bg(RosePine::SURFACE))
+        .borders(Borders::NONE);
+    frame.render_widget(bg_block, tags_inner);
+
+    let tags_text = if snippet.tags.is_empty() {
+        "No tags yet. Press 't' to add 󰜣 tags.".to_string()
+    } else {
+        snippet.get_tags_display_string()
+    };
+
+    let tags_paragraph = Paragraph::new(tags_text)
+        .style(Style::default().fg(RosePine::IRIS))
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(tags_paragraph, tags_inner);
 
     // Show content preview with syntax highlighting
     if !snippet.content.is_empty() {
@@ -1239,8 +1316,8 @@ fn render_snippet_preview(
             .border_type(BorderType::Rounded)
             .style(Style::default().fg(RosePine::FOAM).bg(RosePine::BASE));
 
-        let inner_content_area = content_block.inner(chunks[1]);
-        content_block.render(chunks[1], frame.buffer_mut());
+        let inner_content_area = content_block.inner(main_chunks[1]);
+        content_block.render(main_chunks[1], frame.buffer_mut());
 
         let content_bg = Block::default()
             .style(Style::default().bg(RosePine::SURFACE))
@@ -1293,7 +1370,7 @@ fn render_snippet_preview(
         let empty_text = Paragraph::new("Empty snippet\nPress Enter to edit")
             .alignment(Alignment::Center)
             .style(Style::default().fg(RosePine::MUTED));
-        empty_text.render(chunks[1], frame.buffer_mut());
+        empty_text.render(main_chunks[1], frame.buffer_mut());
     }
 }
 
@@ -1596,4 +1673,66 @@ fn render_settings_view(frame: &mut Frame, area: Rect, _app: &App) {
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::TEXT));
     paragraph.render(area, frame.buffer_mut());
+}
+
+fn render_tags_editing(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+    let popup_width = 70;
+    let popup_height = 10;
+
+    // Calculate centered position for the popup
+    let popup_area = Rect::new(
+        (area.width.saturating_sub(popup_width)) / 2,
+        (area.height.saturating_sub(popup_height)) / 2,
+        popup_width.min(area.width),
+        popup_height.min(area.height),
+    );
+
+    // Render a clear area for the popup
+    Clear.render(popup_area, frame.buffer_mut());
+
+    // Create a block for the popup
+    let block = Block::bordered()
+        .title(" Edit Tags ")
+        .title_alignment(Alignment::Center)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::IRIS));
+
+    let inner_area = block.inner(popup_area);
+    block.render(popup_area, frame.buffer_mut());
+
+    // Split inner area for content
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // Help text
+        Constraint::Length(3), // Input area
+        Constraint::Fill(1),   // Info area
+    ])
+    .split(inner_area);
+
+    // Render help text
+    let help_text = "Enter tags separated by spaces, prefix with # (e.g. #rust #web)";
+    let help_paragraph = Paragraph::new(help_text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH));
+    help_paragraph.render(chunks[0], frame.buffer_mut());
+
+    // Render input field
+    let input_block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE));
+
+    let input_inner = input_block.inner(chunks[1]);
+    input_block.render(chunks[1], frame.buffer_mut());
+
+    let input_text = Paragraph::new(app.input_buffer.as_str())
+        .style(Style::default().fg(RosePine::TEXT))
+        .alignment(Alignment::Left);
+    input_text.render(input_inner, frame.buffer_mut());
+
+    // Render info text
+    let info_text = "Press Enter to save, Esc to cancel";
+    let info_paragraph = Paragraph::new(info_text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(RosePine::MUTED));
+    info_paragraph.render(chunks[2], frame.buffer_mut());
 }

@@ -286,4 +286,47 @@ impl CodeSnippet {
     pub fn get_line_count(&self) -> usize {
         self.content.lines().count()
     }
+
+    pub fn has_tag(&self, tag_name: &str) -> bool {
+        // Remove # prefix if present
+        let clean_name = if tag_name.starts_with('#') {
+            &tag_name[1..]
+        } else {
+            tag_name
+        };
+
+        self.tags
+            .iter()
+            .any(|t| t.to_lowercase() == clean_name.to_lowercase())
+    }
+
+    pub fn set_tags_from_text(&mut self, text: &str) {
+        // Extract tags (words that start with #)
+        let mut new_tags = Vec::new();
+        for word in text.split_whitespace() {
+            if word.starts_with('#') && word.len() > 1 {
+                let tag_name = word[1..].to_string();
+                if !tag_name.is_empty() && !new_tags.contains(&tag_name) {
+                    new_tags.push(tag_name);
+                }
+            }
+        }
+
+        if new_tags != self.tags {
+            self.tags = new_tags;
+            self.updated_at = Utc::now();
+        }
+    }
+
+    pub fn get_tags_display_string(&self) -> String {
+        if self.tags.is_empty() {
+            String::new()
+        } else {
+            self.tags
+                .iter()
+                .map(|t| format!("#{}", t))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    }
 }

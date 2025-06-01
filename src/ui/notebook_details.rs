@@ -69,6 +69,7 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
         Constraint::Length(3),  // Navigation bar
         Constraint::Length(10), // Overview information
         Constraint::Length(12), // Language distribution
+        Constraint::Length(8),  // Tags section
         Constraint::Min(5),     // Snippets list
         Constraint::Length(1),  // Status line
     ])
@@ -117,7 +118,7 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
     let status = Paragraph::new(status_text)
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::MUTED));
-    status.render(chunks[4], frame.buffer_mut());
+    status.render(chunks[5], frame.buffer_mut());
 
     // Calculate statistics
     let total_lines: usize = snippets.iter().map(|s| s.get_line_count()).sum();
@@ -136,6 +137,20 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
         *languages.entry(snippet.language.clone()).or_insert(0) += 1;
         *lang_lines.entry(snippet.language.clone()).or_insert(0) += lines;
     }
+
+    // Collect all unique tags and count their occurrences
+    let mut tag_counts = HashMap::new();
+    let mut total_tags = 0;
+    for snippet in &snippets {
+        for tag in &snippet.tags {
+            *tag_counts.entry(tag.clone()).or_insert(0) += 1;
+            total_tags += 1;
+        }
+    }
+
+    // Sort tags by frequency
+    let mut sorted_tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
+    sorted_tags.sort_by(|a, b| b.1.cmp(&a.1));
 
     // Find most used language
     let _most_used_language = languages
@@ -231,6 +246,20 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
             Span::styled(
                 total_lines.to_string(),
                 Style::default().fg(RosePine::GOLD).bold(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Total Tags: ", Style::default().fg(RosePine::MUTED)),
+            Span::styled(
+                total_tags.to_string(),
+                Style::default().fg(RosePine::IRIS).bold(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Unique Tags: ", Style::default().fg(RosePine::MUTED)),
+            Span::styled(
+                sorted_tags.len().to_string(),
+                Style::default().fg(RosePine::FOAM).bold(),
             ),
         ]),
         Line::from(vec![
@@ -361,14 +390,68 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
         }
     }
 
+    // TAGS SECTION
+    let tags_block = Block::bordered()
+        .title(" Tags ")
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::SUBTLE));
+
+    let tags_area = tags_block.inner(chunks[3]);
+    tags_block.render(chunks[3], frame.buffer_mut());
+
+    if sorted_tags.is_empty() {
+        let no_tags = Paragraph::new("No tags found in this notebook")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(RosePine::MUTED));
+        no_tags.render(tags_area, frame.buffer_mut());
+    } else {
+        let tag_columns =
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(tags_area);
+        let mut left_tags = Vec::new();
+        let mut right_tags = Vec::new();
+
+        for (idx, (tag, count)) in sorted_tags.iter().enumerate() {
+            let tag_line = Line::from(vec![
+                Span::styled(
+                    format!("#{}", tag),
+                    Style::default().fg(RosePine::IRIS).bold(),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    format!("({})", count),
+                    Style::default().fg(RosePine::SUBTLE),
+                ),
+            ]);
+
+            if idx % 2 == 0 {
+                left_tags.push(tag_line);
+            } else {
+                right_tags.push(tag_line);
+            }
+        }
+
+        // Render tag columns
+        let left_paragraph = Paragraph::new(left_tags)
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        let right_paragraph = Paragraph::new(right_tags)
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        left_paragraph.render(tag_columns[0], frame.buffer_mut());
+        right_paragraph.render(tag_columns[1], frame.buffer_mut());
+    }
+
     // 3. SNIPPETS LIST SECTION
     let snippets_block = Block::bordered()
         .title(" Snippets ")
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
-    let snippets_area = snippets_block.inner(chunks[3]);
-    snippets_block.render(chunks[3], frame.buffer_mut());
+    let snippets_area = snippets_block.inner(chunks[4]);
+    snippets_block.render(chunks[4], frame.buffer_mut());
 
     if snippets.is_empty() {
         let no_snippets =
