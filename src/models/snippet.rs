@@ -264,7 +264,7 @@ impl CodeSnippet {
             file_extension,
             metadata: HashMap::new(),
             version: 1,
-            syntax_theme: String::from("base16-ocean.dark"),
+            syntax_theme: "default".to_string(),
         }
     }
 
@@ -320,13 +320,24 @@ impl CodeSnippet {
 
     pub fn get_tags_display_string(&self) -> String {
         if self.tags.is_empty() {
-            String::new()
-        } else {
-            self.tags
-                .iter()
-                .map(|t| format!("#{}", t))
-                .collect::<Vec<_>>()
-                .join(" ")
+            return String::new();
         }
+
+        self.tags
+            .iter()
+            .map(|t| format!("#{}", t))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Toggle the favorite status of the snippet
+    pub fn toggle_favorite(&mut self) {
+        self.is_favorite = !self.is_favorite;
+        self.updated_at = Utc::now();
+    }
+
+    /// Check if the snippet is favorited
+    pub fn is_favorited(&self) -> bool {
+        self.is_favorite
     }
 }

@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::ui::colors::RosePine;
 use crate::ui::components::render_bottom_bar;
+use crate::ui::favorites::render_favorites_section;
 use chrono::{DateTime, Utc};
 use ratatui::{
     Frame,
@@ -29,23 +30,21 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Adjust layout based on whether we have snippets to show
     let has_recent_snippets = !app.snippet_database.snippets.is_empty();
+    let has_favorites = app
+        .snippet_database
+        .snippets
+        .values()
+        .any(|s| s.is_favorited());
 
-    let main_chunks = if has_recent_snippets {
-        Layout::vertical([
-            Constraint::Fill(1),
-            Constraint::Length(2),
-            Constraint::Length(12),
-            Constraint::Length(3),
-        ])
-        .split(inner_area)
-    } else {
-        Layout::vertical([
-            Constraint::Fill(1),
-            Constraint::Length(3),
-            Constraint::Length(3),
-        ])
-        .split(inner_area)
-    };
+    // Always show the bottom bar
+    let main_chunks = Layout::vertical([
+        Constraint::Fill(1),   // Top section (title, menu)
+        Constraint::Length(2), // Description
+        Constraint::Length(if has_recent_snippets { 12 } else { 0 }), // Recent snippets (conditional)
+        Constraint::Length(if has_favorites { 12 } else { 0 }),       // Favorites (conditional)
+        Constraint::Length(3),                                        // Bottom bar (always shown)
+    ])
+    .split(inner_area);
 
     let content_area = Layout::horizontal([
         Constraint::Fill(1),
@@ -68,12 +67,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_menu(frame, content_chunks[3], app);
     render_description(frame, main_chunks[1], app);
 
+    let mut current_index = 2; // Start after description
+
     if has_recent_snippets {
-        render_recent_snippets(frame, main_chunks[2], app);
-        render_bottom_bar(frame, main_chunks[3], app);
-    } else {
-        render_bottom_bar(frame, main_chunks[2], app);
+        render_recent_snippets(frame, main_chunks[current_index], app);
+        current_index += 1;
     }
+
+    if has_favorites {
+        render_favorites_section(frame, main_chunks[current_index], app);
+    }
+
+    // Always render bottom bar at the bottom position
+    render_bottom_bar(frame, main_chunks[4], app);
 }
 
 /// Renders the ASCII art title with elegant typography

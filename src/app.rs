@@ -1689,6 +1689,26 @@ impl App {
         crate::search::open_selected_search_result(self)
     }
 
+    pub fn toggle_favorite_snippet(&mut self, snippet_id: Uuid) -> Result<(), String> {
+        let is_favorited = {
+            if let Some(snippet) = self.snippet_database.snippets.get_mut(&snippet_id) {
+                snippet.toggle_favorite();
+                snippet.is_favorited()
+            } else {
+                return Err("Snippet not found".to_string());
+            }
+        };
+
+        self.save_database()?;
+
+        self.set_success_message(format!(
+            "Snippet {} as favorite",
+            if is_favorited { "marked" } else { "unmarked" }
+        ));
+
+        Ok(())
+    }
+
     pub fn set_pending_action<F>(&mut self, message: String, action: Box<F>)
     where
         F: FnOnce(&mut App) + 'static,

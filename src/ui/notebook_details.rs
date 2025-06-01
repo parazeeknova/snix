@@ -113,8 +113,7 @@ pub fn render(frame: &mut Frame, app: &mut App, notebook_id: Uuid) {
     }
 
     // Render status line
-    let status_text =
-        "← Back (Esc) • 's' to Create Snippet • 'e' to Edit Description • 'c' to Change Color";
+    let status_text = "← Back (Esc) • 's' to Create Snippet • 'e' to Edit Description • 'c' to Change Color • 'f' to Toggle Favorite";
     let status = Paragraph::new(status_text)
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::MUTED));

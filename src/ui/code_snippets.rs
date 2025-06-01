@@ -857,6 +857,10 @@ fn render_tree_view_with_colors(frame: &mut Frame, area: Rect, app: &mut App) {
 
                     let mut title_text = snippet.title.clone();
 
+                    if snippet.is_favorited() {
+                        title_text = format!("{} ", title_text);
+                    }
+
                     if let Some(desc) = &snippet.description {
                         if !desc.is_empty() {
                             let short_desc = if desc.len() > 30 {

@@ -804,7 +804,11 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         }
 
         // Toggle favorites filter
-        KeyCode::Char('f') => {
+        KeyCode::Char('f')
+            if !app.has_pending_action()
+                && app.input_mode == InputMode::Normal
+                && app.get_selected_item().is_none() =>
+        {
             app.clear_messages();
             app.show_favorites_only = !app.show_favorites_only;
             app.refresh_tree_items();
@@ -942,7 +946,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
-        // Add tag editing functionality
+        // Set tag editing mode
         KeyCode::Char('t') => {
             app.clear_messages();
 
@@ -958,6 +962,20 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                 }
             } else {
                 app.set_error_message("Select a snippet first".to_string());
+            }
+            false
+        }
+
+        // Toggle favorite status for the current snippet
+        KeyCode::Char('f') => {
+            if app.input_mode == InputMode::Normal {
+                if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                    if let Err(e) = app.toggle_favorite_snippet(*snippet_id) {
+                        app.set_error_message(e);
+                    }
+                } else {
+                    app.set_error_message("Select a snippet to mark as favorite".to_string());
+                }
             }
             false
         }

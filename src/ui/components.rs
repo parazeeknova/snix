@@ -123,7 +123,7 @@ fn get_context_shortcuts(app: &mut App) -> String {
                             };
 
                         format!(
-                            "{} [n] Root │ [b] Nested │ {} │ {} │ [?] ",
+                            "{} [n] Root │ [b] Nested │ [s] Snippet │ [f] Favorite │ {} │ {} │ [?] ",
                             back_hint, collapse_text, move_hint
                         )
                     }
