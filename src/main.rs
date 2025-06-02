@@ -29,6 +29,7 @@ use std::panic;
 use std::time::Duration;
 
 mod app;
+mod cli;
 mod handlers;
 mod models;
 mod search;
@@ -40,6 +41,16 @@ use handlers::keys::handle_key_events;
 /// Sets up the terminal, runs the application loop, and ensures clean exit
 /// even if the application panics.
 fn main() -> Result<(), Box<dyn Error>> {
+    // Get command line arguments
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // If there are arguments, run in CLI mode
+    if !args.is_empty() {
+        return cli::execute_cli(&args).map_err(|e| e.into());
+    }
+
+    // Otherwise, run in TUI mode
+
     // Set up panic hook
     panic::set_hook(Box::new(|info| {
         let _ = cleanup_terminal();

@@ -1,70 +1,112 @@
 # Snix
 
-<img src="./assets/snix_rust.png" alt="Snix Logo" width="100%">
+<img width="1200" src="./assets/snix_rust.png" alt="Snix Logo">
 
 <sub><sub>z</sub></sub><sub>z</sub>z
 
-Extremely fast, lightweight code snippets & boilerplate (soon!) manager for developers, built with rust for developers to access their code snippets quickly and efficiently.
+Snix is a extremely fast code snippets & boilerplate manager (soon!) for your terminal. Inspired by Nap, Create and manage notebooks, snippets, and boilerplates with ease. Snix is designed to be fast, efficient, and user-friendly text-user interface, making it the perfect tool for developers who want to streamline their workflow in terminal.
 
-## 🎨 Screenshots
+<br />
 
-| Home with recents | Snippets | New Snippets |
-|:-:|:-:|:-:|
-| ![home](./assets/home.png) | ![snippets](./assets/snippet.png) | ![search](./assets/search.png)
+<p align="center">
+<img width="1000" src="./assets/showcase.gif" alt="snix showcase" />
+</p>
 
-| Notebook Details | Actions | blank snippet |
-|:-:|:-:|:-:|
-| ![wip](./assets/notebook_details.png) | ![keybindings](./assets/keyboard_shortcut.png) | ![welcome](./assets/welcome.png)
+<br />
 
-### Current Status
-
-Snix is currently in **active development**. The core navigation and UI framework are complete, with individual feature pages showing work-in-progress dialogs. Each page will be implemented with full functionality in upcoming releases.
-
-## 🛠️ Development
-### Building from Source
+## Text-based User Interface
+Launch the interactive interface:
 
 ```bash
-# Clone and navigate
-git clone https://github.com/parazeeknova/snix.git
-cd snix
-
-# Check code quality (optional)
-cargo check
-
-# Run with debug info
-cargo run # or make run
-
-# Build optimized release
-cargo build --release # or make release && make install to install globally
+snix
 ```
 
-## 🤝 Contributing
+<img width="1000" src="./assets/tui.gif" alt="snix tui showcase"/>
 
-We welcome contributions! Here's how you can help:
+<br />
 
-### Getting Started
+## Command Line Interface
 
-1. **Fork** the repository
-2. **Clone** your fork: `git clone https://github.com/yourusername/snix.git`
-3. **Create** a feature branch: `git checkout -b feature/amazing-feature`
-4. **Make** your changes
-5. **Test** thoroughly: `cargo test && cargo check`
-6. **Commit** with clear messages: `git commit -m 'Add amazing feature'`
-7. **Push** to your branch: `git push origin feature/amazing-feature`
-8. **Create** a Pull Request
+List notebooks/snippets:
 
-### 📝 License
+```bash
+# List entire tree of notebooks/snippets
+snix list / ls
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+# List snippets in current notebook
+snix list <notebook_name>
+
+# List all notebooks
+snix list notebooks
+```
+
+<img width="600" src="./assets/snix_list_types.gif" alt="snix list"/>
+
+Search for snippets:
+
+```bash
+# Search for snippets globally
+snix search <query>
+# Supports fuzzy search
+```
+
+<img width="600" src="./assets/snix_search.gif" alt="snix search"/>
+
+List your favorite snippets / Preview a snippet:
+
+```bash
+snix list favorites / fav
+
+# Preview a snippet using the snippet name
+snix show / view <snippet_name>
+
+# Preview a snippet using snippet ID
+snix show / view  <snippet_id>
+```
+<img width="600" src="./assets/snix_fav.gif" alt="snix favorites"/>
+
+## Installation
+
+Build from source:
+
+```bash
+git clone https://github.com/parazeeknova/snix.git
+cd snix
+cargo run
+```
+or using make:
+
+```bash
+cd snix
+make install
+```
+
+## Screenshot
+
+<br />
+
+<p align="center">
+  <img
+    width="1000"
+    alt="image"
+    src="./assets/showcase.png"
+  />
+</p>
+
+<br />
+
+## License
+
+[MIT](https://github.com/parazeeknova/snix/blob/master/LICENSE)
+
+## Feedback
+
+I'd love to hear your feedback on improving `snix`.
+
+Feel free to reach out via:
+* [Twitter](https://x.com/hashcodes_)
+* [GitHub issues](https://github.com/parazeeknova/snix/issues/new)
 
 ---
 
-<div align="center">
-
-**Star this repository if you find it helpful!**
-
-[Report Bug](https://github.com/parazeeknova/snix/issues) · [Request Feature](https://github.com/parazeeknova/snix/issues) · [Contribute](CONTRIBUTING.md)
-
-*Built with ❤️ and Rust 🦀*
-
-</div>
+<sub><sub>z</sub></sub><sub>z</sub>z
