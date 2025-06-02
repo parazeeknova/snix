@@ -1,6 +1,6 @@
 [package]
 name = "snix"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -24,3 +24,4 @@ tree-sitter-go = "0.21"
 tree-sitter-typescript = "0.21"
 crossterm = "0.29.0"
 once_cell = "1.19"
+serde_yaml = "0.9.34"

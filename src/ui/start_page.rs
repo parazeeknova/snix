@@ -1,7 +1,6 @@
 use crate::app::App;
 use crate::ui::colors::RosePine;
 use crate::ui::components::render_bottom_bar;
-use crate::ui::favorites::render_favorites_section;
 use chrono::{DateTime, Utc};
 use ratatui::{
     Frame,
@@ -30,18 +29,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Adjust layout based on whether we have snippets to show
     let has_recent_snippets = !app.snippet_database.snippets.is_empty();
-    let has_favorites = app
-        .snippet_database
-        .snippets
-        .values()
-        .any(|s| s.is_favorited());
 
     // Always show the bottom bar
     let main_chunks = Layout::vertical([
         Constraint::Fill(1),   // Top section (title, menu)
         Constraint::Length(2), // Description
         Constraint::Length(if has_recent_snippets { 12 } else { 0 }), // Recent snippets (conditional)
-        Constraint::Length(if has_favorites { 12 } else { 0 }),       // Favorites (conditional)
         Constraint::Length(3),                                        // Bottom bar (always shown)
     ])
     .split(inner_area);
@@ -67,19 +60,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_menu(frame, content_chunks[3], app);
     render_description(frame, main_chunks[1], app);
 
-    let mut current_index = 2; // Start after description
-
     if has_recent_snippets {
-        render_recent_snippets(frame, main_chunks[current_index], app);
-        current_index += 1;
-    }
-
-    if has_favorites {
-        render_favorites_section(frame, main_chunks[current_index], app);
+        render_recent_snippets(frame, main_chunks[2], app);
     }
 
     // Always render bottom bar at the bottom position
-    render_bottom_bar(frame, main_chunks[4], app);
+    render_bottom_bar(frame, main_chunks[3], app);
 }
 
 /// Renders the ASCII art title with elegant typography
@@ -139,6 +125,7 @@ fn render_menu(frame: &mut Frame, area: Rect, app: &App) {
         ("󰘦", "Boilerplates", "b"),
         ("󰓜", "Marketplace", "m"),
         ("", "Code Snippets", "s"),
+        ("", "Export/Import", "e"),
         ("", "About", "i"),
         ("", "Settings", "c"),
         ("󰈆", "Exit", "q"),
@@ -200,6 +187,7 @@ fn render_description(frame: &mut Frame, area: Rect, app: &App) {
         "Create, manage and deploy boilerplates for React, Vue, Angular, and more",
         "Discover community templates, frameworks, and starter projects",
         "Quick access to reusable code snippets and development patterns",
+        "Import and export snippets/notebooks in JSON or YAML format",
         "Learn about snix's powerful boilerplate management features",
         "Customize your development workflow and preferences",
         "Save your work and exit the application",
@@ -216,7 +204,6 @@ fn render_description(frame: &mut Frame, area: Rect, app: &App) {
 
 /// Renders recent snippets section below the main content
 fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
-    // Use the same width as the menu for visual consistency
     let snippets_area = Layout::horizontal([
         Constraint::Fill(1),
         Constraint::Length(80),

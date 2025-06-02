@@ -1,6 +1,7 @@
 use crate::models::storage::SnippetDatabase;
 use crate::models::{CodeSnippet, Notebook, SnippetLanguage, StorageManager, TagManager};
-use crate::ui::{code_snippets, components, start_page};
+use crate::ui::export_import::ExportImportState;
+use crate::ui::{code_snippets, components, export_import, start_page};
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use uuid::Uuid;
@@ -21,6 +22,7 @@ pub enum AppState {
     CodeSnippets,
     InfoPage,
     Settings,
+    ExportImport,
 }
 
 impl Default for AppState {
@@ -200,6 +202,7 @@ pub struct App {
     pub recent_searches: Vec<RecentSearchEntry>,
     pub selected_recent_search: usize,
     pub tag_manager: TagManager,
+    pub export_import_state: Option<ExportImportState>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -277,6 +280,7 @@ impl App {
             recent_searches: Vec::new(),
             selected_recent_search: 0,
             tag_manager,
+            export_import_state: None,
         };
 
         app.refresh_tree_items();
@@ -289,23 +293,22 @@ impl App {
     /// reaches the maximum number of menu items. This allows users to navigate
     /// through menu options using the down arrow or 'j' key.
     ///
-    /// The total number of menu items is currently 6 (indices 0-5), so the
+    /// The total number of menu items is currently 7 (indices 0-6), so the
     /// selection will cycle through all available options.
     pub fn next_menu_item(&mut self) {
-        self.selected_menu_item = (self.selected_menu_item + 1) % 6;
+        self.selected_menu_item = (self.selected_menu_item + 1) % 7;
     }
 
     /// Moves the menu selection to the previous item in a circular fashion
     ///
     /// Decrements the selected menu item index, wrapping around to the last item
-    /// (index 5) when it goes below 0. This allows users to navigate through menu
-    /// options using the up arrow or 'k' key in reverse order.
+    /// when it reaches 0. This allows users to navigate through menu options
+    /// using the up arrow or 'k' key.
+    ///
+    /// The total number of menu items is currently 7 (indices 0-6), so the
+    /// selection will cycle through all available options.
     pub fn previous_menu_item(&mut self) {
-        self.selected_menu_item = if self.selected_menu_item == 0 {
-            5
-        } else {
-            self.selected_menu_item - 1
-        };
+        self.selected_menu_item = (self.selected_menu_item + 7 - 1) % 7;
     }
 
     /// Navigates to a new application state and updates the page history
@@ -665,9 +668,9 @@ impl App {
 
     /// Renders the current application state to the terminal frame
     ///
-    /// This is the main rendering dispatch method that determines which UI rendering
-    /// function to call based on the current application state. It acts as a router,
-    /// directing the rendering process to the appropriate page implementation.
+    /// This is the main entry point for all rendering in the application. It uses
+    /// the current application state to determine which page-specific rendering
+    /// function to call.
     ///
     /// For the StartPage, it calls the dedicated start page renderer. For all other
     /// states, it displays a work-in-progress dialog with appropriate page titles
@@ -684,11 +687,12 @@ impl App {
             }
             AppState::CodeSnippets => code_snippets::render(frame, self),
             AppState::InfoPage => {
-                components::render_wip_dialog(frame, frame.area(), "  About", self)
+                components::render_wip_dialog(frame, frame.area(), " About", self)
             }
             AppState::Settings => {
                 components::render_wip_dialog(frame, frame.area(), " Settings", self)
             }
+            AppState::ExportImport => export_import::render(frame, self),
         }
     }
 

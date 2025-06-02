@@ -8,6 +8,9 @@ use ratatui::{
 };
 
 /// Render the favorites/pinned snippets section for the home screen
+///
+/// This will be used later on ignore this warning
+
 pub fn render_favorites_section(frame: &mut Frame, area: Rect, app: &App) {
     let favorites_area = Layout::horizontal([
         Constraint::Fill(1),

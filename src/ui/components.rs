@@ -59,6 +59,7 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn get_context_shortcuts(app: &mut App) -> String {
     use crate::app::{AppState, CodeSnippetsState, InputMode};
+    use crate::ui::export_import::ExportImportMode;
 
     let back_hint = if app.can_go_back() { " [←] │ " } else { "" };
 
@@ -128,6 +129,49 @@ fn get_context_shortcuts(app: &mut App) -> String {
                         )
                     }
                 }
+            }
+        }
+
+        (AppState::ExportImport, InputMode::Normal) => {
+            if let Some(export_state) = &app.export_import_state {
+                match export_state.mode {
+                    ExportImportMode::MainMenu => {
+                        format!(
+                            "{} [↑↓] Navigate │ [⏎] Select │ [h] Home │ [Esc] Back ",
+                            back_hint
+                        )
+                    }
+                    ExportImportMode::ExportOptions => {
+                        format!(
+                            "{} [↑↓] Navigate │ [⏎] Toggle/Select │ [Esc] Back ",
+                            back_hint
+                        )
+                    }
+                    ExportImportMode::ImportOptions => {
+                        format!(
+                            "{} [↑↓] Navigate │ [⏎] Toggle/Select │ [Esc] Back ",
+                            back_hint
+                        )
+                    }
+                    ExportImportMode::ExportPath | ExportImportMode::ImportPath => {
+                        format!("{} [⏎] Confirm │ [Esc] Back ", back_hint)
+                    }
+                    ExportImportMode::ImportClipboard => {
+                        format!("{} [⏎] Import │ [Esc] Back ", back_hint)
+                    }
+                    ExportImportMode::Importing => {
+                        format!("{} [⏎] Import │ [Esc] Back ", back_hint)
+                    }
+                    ExportImportMode::ImportPathPopup => {
+                        format!("{} [⏎] Import File │ [Esc] Back ", back_hint)
+                    }
+                    _ => format!("{} [Esc] Back ", back_hint),
+                }
+            } else {
+                format!(
+                    "{} [↑↓] Navigate │ [⏎] Select │ [h] Home │ [q] Quit ",
+                    back_hint
+                )
             }
         }
 
@@ -285,15 +329,85 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                     }
                 }
             }
+            crate::app::AppState::ExportImport => {
+                spans.push(Span::styled(
+                    " Export/Import ",
+                    Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
+                ));
+
+                // Add mode-specific breadcrumb
+                if let Some(export_state) = &app.export_import_state {
+                    use crate::ui::export_import::ExportImportMode;
+
+                    spans.push(Span::styled(" ❯ ", Style::default().fg(RosePine::MUTED)));
+
+                    match export_state.mode {
+                        ExportImportMode::MainMenu => {
+                            spans.push(Span::styled(
+                                " 󰍜 Menu ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::ExportOptions => {
+                            spans.push(Span::styled(
+                                " 󰥞 Export Options ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::ExportPath => {
+                            spans.push(Span::styled(
+                                "  Export Path ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::ImportOptions => {
+                            spans.push(Span::styled(
+                                " 󰥝 Import Options ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::ImportPath => {
+                            spans.push(Span::styled(
+                                "  Import Path ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::ImportClipboard => {
+                            spans.push(Span::styled(
+                                "  Import from Clipboard ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::Exporting => {
+                            spans.push(Span::styled(
+                                "  Exporting... ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::Importing => {
+                            spans.push(Span::styled(
+                                " 󰋺 Importing... ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                        ExportImportMode::ImportPathPopup => {
+                            spans.push(Span::styled(
+                                "  Import File ",
+                                Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
+                            ));
+                        }
+                    }
+                }
+            }
             crate::app::AppState::InfoPage => {
                 spans.push(Span::styled(
-                    " Info ",
+                    " 󱁯 Info ",
                     Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
                 ));
             }
             crate::app::AppState::Settings => {
                 spans.push(Span::styled(
-                    " Settings ",
+                    "  Settings ",
                     Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
                 ));
             }

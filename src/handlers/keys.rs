@@ -86,6 +86,17 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
 
         // Global back navigation - only works if there's history to go back to
         KeyCode::Backspace => {
+            // Don't trigger back navigation when in import path popup - fixes bug for import autocomplete
+            if let (AppState::ExportImport, Some(export_state)) =
+                (&app.state, &app.export_import_state)
+            {
+                if export_state.mode == crate::ui::export_import::ExportImportMode::ImportPathPopup
+                {
+                    // Let the mode-specific handler deal with backspace
+                    return handle_export_import_keys(key, app);
+                }
+            }
+
             if app.can_go_back() {
                 app.go_back();
             }
@@ -96,6 +107,7 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
         _ => match app.state {
             AppState::StartPage => handle_start_page_keys(key, app),
             AppState::CodeSnippets => handle_code_snippets_keys(key, app),
+            AppState::ExportImport => handle_export_import_keys(key, app),
             _ => handle_other_page_keys(key, app),
         },
     }
@@ -1321,8 +1333,12 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
 /// and provides convenient single-letter shortcuts for quick navigation to
 /// specific sections of the application.
 fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
-    // Clear any previous messages
-    app.clear_messages();
+    // Dismiss any messages with Enter key
+    if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
+    {
+        app.clear_messages();
+        return false;
+    }
 
     match key.code {
         // Menu navigation - move selection up (vi-style 'k' and arrow key)
@@ -1358,24 +1374,68 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
                     false
                 }
 
-                // Navigate to Info/About page
+                // Navigate to Export/Import page
                 3 => {
+                    app.navigate_to(AppState::ExportImport);
+                    app.export_import_state =
+                        Some(crate::ui::export_import::ExportImportState::default());
+                    false
+                }
+
+                // Navigate to Info/About page
+                4 => {
                     app.navigate_to(AppState::InfoPage);
                     false
                 }
 
                 // Navigate to Settings page
-                4 => {
+                5 => {
                     app.navigate_to(AppState::Settings);
                     false
                 }
 
                 // Exit application (last menu item)
-                5 => true,
+                6 => true,
 
                 // Safety fallback for any invalid menu indices
                 _ => false,
             }
+        }
+
+        // Quick navigation shortcuts
+        KeyCode::Char('q') => {
+            return true;
+        }
+
+        KeyCode::Char('b') => {
+            app.navigate_to(AppState::Boilerplates);
+            false
+        }
+
+        KeyCode::Char('m') => {
+            app.navigate_to(AppState::Marketplace);
+            false
+        }
+
+        KeyCode::Char('s') => {
+            app.navigate_to(AppState::CodeSnippets);
+            false
+        }
+
+        KeyCode::Char('e') => {
+            app.navigate_to(AppState::ExportImport);
+            app.export_import_state = Some(crate::ui::export_import::ExportImportState::default());
+            false
+        }
+
+        KeyCode::Char('i') => {
+            app.navigate_to(AppState::InfoPage);
+            false
+        }
+
+        KeyCode::Char('c') => {
+            app.navigate_to(AppState::Settings);
+            false
         }
 
         // Quick search functionality from start page
@@ -1386,36 +1446,6 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
             app.input_buffer.clear();
             app.search_query.clear();
             app.search_results.clear();
-            false
-        }
-
-        // Direct navigation shortcuts - Boilerplates (both cases supported)
-        KeyCode::Char('b') | KeyCode::Char('B') => {
-            app.navigate_to(AppState::Boilerplates);
-            false
-        }
-
-        // Direct navigation shortcuts - Marketplace (both cases supported)
-        KeyCode::Char('m') | KeyCode::Char('M') => {
-            app.navigate_to(AppState::Marketplace);
-            false
-        }
-
-        // Direct navigation shortcuts - Code Snippets (both cases supported)
-        KeyCode::Char('s') | KeyCode::Char('S') => {
-            app.navigate_to(AppState::CodeSnippets);
-            false
-        }
-
-        // Direct navigation shortcuts - Info/About page (both cases supported)
-        KeyCode::Char('i') | KeyCode::Char('I') => {
-            app.navigate_to(AppState::InfoPage);
-            false
-        }
-
-        // Direct navigation shortcuts - Settings (both cases supported)
-        KeyCode::Char('c') | KeyCode::Char('C') => {
-            app.navigate_to(AppState::Settings);
             false
         }
 
@@ -1621,4 +1651,539 @@ fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
         ("Pink", RosePine::ROSE),
         ("White", ratatui::style::Color::White),
     ]
+}
+
+/// Handles keyboard input for the export/import page
+fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
+    use crate::models::{
+        ExportFormat, ExportOptions, export_database_with_tags, import_database,
+        import_from_clipboard, merge_import_into_database_with_tags,
+    };
+    use crate::ui::export_import::{ExportImportMode, ExportImportState};
+    use std::path::Path;
+
+    // Get mutable reference to export/import state
+    if app.export_import_state.is_none() {
+        app.export_import_state = Some(ExportImportState::default());
+    }
+
+    let state = app.export_import_state.as_mut().unwrap();
+
+    // Set JSON as the default export format
+    state.export_format = ExportFormat::JSON;
+
+    // If we have a status message showing, any key dismisses it
+    if state.status_message.is_some() {
+        state.status_message = None;
+        return false;
+    }
+
+    match state.mode {
+        ExportImportMode::MainMenu => {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.selected_option = state.selected_option.saturating_sub(1);
+                    false
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.selected_option = (state.selected_option + 1).min(2);
+                    false
+                }
+                // Shortcut keys for menu options
+                KeyCode::Char('e') | KeyCode::Char('E') => {
+                    // Export to JSON
+                    state.mode = ExportImportMode::ExportOptions;
+                    state.selected_option = 0;
+                    false
+                }
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    // Import from file
+                    state.mode = ExportImportMode::ImportOptions;
+                    state.selected_option = 0;
+                    false
+                }
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    // Import from clipboard
+                    state.mode = ExportImportMode::ImportClipboard;
+                    false
+                }
+                KeyCode::Enter => {
+                    match state.selected_option {
+                        0 => {
+                            // Export to JSON
+                            state.mode = ExportImportMode::ExportOptions;
+                            state.selected_option = 0;
+                            false
+                        }
+                        1 => {
+                            // Import from file
+                            state.mode = ExportImportMode::ImportOptions;
+                            state.selected_option = 0;
+                            false
+                        }
+                        2 => {
+                            // Import from clipboard
+                            state.mode = ExportImportMode::ImportClipboard;
+                            false
+                        }
+                        _ => false,
+                    }
+                }
+                KeyCode::Esc => {
+                    if app.can_go_back() {
+                        app.go_back();
+                    }
+                    false
+                }
+                _ => false,
+            }
+        }
+        ExportImportMode::ExportOptions => {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.selected_option = state.selected_option.saturating_sub(1);
+                    false
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.selected_option = (state.selected_option + 1).min(2);
+                    false
+                }
+                KeyCode::Enter => {
+                    match state.selected_option {
+                        0 => {
+                            // Toggle include content
+                            state.include_content = !state.include_content;
+                            false
+                        }
+                        1 => {
+                            // Toggle favorites only
+                            state.favorites_only = !state.favorites_only;
+                            false
+                        }
+                        2 => {
+                            // Continue to path selection
+                            state.mode = ExportImportMode::ExportPath;
+                            app.input_buffer = state.export_path.to_string_lossy().to_string();
+                            false
+                        }
+                        _ => false,
+                    }
+                }
+                KeyCode::Esc => {
+                    state.mode = ExportImportMode::MainMenu;
+                    state.selected_option = 0;
+                    false
+                }
+                _ => false,
+            }
+        }
+        ExportImportMode::ExportPath => {
+            match key.code {
+                KeyCode::Enter => {
+                    if !app.input_buffer.is_empty() {
+                        let path = Path::new(&app.input_buffer);
+                        state.export_path = path.to_path_buf();
+
+                        // Perform the export
+                        state.mode = ExportImportMode::Exporting;
+
+                        let options = ExportOptions {
+                            format: state.export_format,
+                            include_content: state.include_content,
+                            notebook_ids: None,
+                            include_favorites_only: state.favorites_only,
+                        };
+
+                        // Clone the tag manager to avoid borrow issues
+                        let tag_manager_clone = app.tag_manager.clone();
+
+                        // Use the function that includes tag information
+                        match export_database_with_tags(
+                            &app.snippet_database,
+                            &tag_manager_clone,
+                            &state.export_path,
+                            &options,
+                        ) {
+                            Ok(_) => {
+                                state.status_message = Some(format!(
+                                    "Export saved to {}",
+                                    state.export_path.display()
+                                ));
+                                state.is_error = false;
+                                state.mode = ExportImportMode::MainMenu;
+                            }
+                            Err(e) => {
+                                state.status_message = Some(format!("Export failed: {}", e));
+                                state.is_error = true;
+                                state.mode = ExportImportMode::MainMenu;
+                            }
+                        }
+                    }
+                    false
+                }
+                KeyCode::Esc => {
+                    state.mode = ExportImportMode::ExportOptions;
+                    app.input_buffer.clear();
+                    false
+                }
+                KeyCode::Char(c) => {
+                    app.input_buffer.push(c);
+                    false
+                }
+                KeyCode::Backspace => {
+                    if !app.input_buffer.is_empty() {
+                        app.input_buffer.pop();
+                    }
+                    false
+                }
+                _ => false,
+            }
+        }
+        ExportImportMode::ImportOptions => {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.selected_option = state.selected_option.saturating_sub(1);
+                    false
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.selected_option = (state.selected_option + 1).min(1);
+                    false
+                }
+                KeyCode::Enter => {
+                    match state.selected_option {
+                        0 => {
+                            // Toggle overwrite existing
+                            state.overwrite_existing = !state.overwrite_existing;
+                            false
+                        }
+                        1 => {
+                            // Continue to file selection
+                            state.mode = ExportImportMode::ImportPathPopup;
+                            app.input_buffer.clear();
+                            false
+                        }
+                        _ => false,
+                    }
+                }
+                KeyCode::Esc => {
+                    state.mode = ExportImportMode::MainMenu;
+                    state.selected_option = 1;
+                    false
+                }
+                _ => false,
+            }
+        }
+        ExportImportMode::ImportPathPopup => {
+            match key.code {
+                KeyCode::Enter => {
+                    if !app.input_buffer.is_empty() {
+                        let path = Path::new(&app.input_buffer);
+                        state.import_path = path.to_path_buf();
+
+                        // Set path and mode
+                        {
+                            let state = app.export_import_state.as_mut().unwrap();
+                            state.import_path = path.to_path_buf();
+                            state.mode = ExportImportMode::Importing;
+                        }
+
+                        // Store the overwrite value
+                        let overwrite =
+                            app.export_import_state.as_ref().unwrap().overwrite_existing;
+                        let import_path = app
+                            .export_import_state
+                            .as_ref()
+                            .unwrap()
+                            .import_path
+                            .clone();
+
+                        // Take ownership of the tag manager to avoid borrow issues
+                        let mut tag_manager_clone = app.tag_manager.clone();
+
+                        match import_database(&import_path) {
+                            Ok(import_data) => {
+                                // Use the function that handles tags
+                                match merge_import_into_database_with_tags(
+                                    &mut app.snippet_database,
+                                    &mut tag_manager_clone,
+                                    import_data,
+                                    overwrite,
+                                ) {
+                                    Ok((notebooks, snippets)) => {
+                                        // Update the app's tag manager with the merged one
+                                        app.tag_manager = tag_manager_clone;
+
+                                        // Refresh the tree view
+                                        app.refresh_tree_items();
+
+                                        // Save database
+                                        let save_result = app.save_database();
+
+                                        // Update the status message and mode
+                                        let state = app.export_import_state.as_mut().unwrap();
+                                        if let Err(e) = save_result {
+                                            state.status_message = Some(format!(
+                                                "Import succeeded but failed to save database: {}",
+                                                e
+                                            ));
+                                            state.is_error = true;
+                                        } else {
+                                            state.status_message = Some(format!(
+                                                "Successfully imported {} notebooks and {} snippets",
+                                                notebooks, snippets
+                                            ));
+                                            state.is_error = false;
+                                        }
+
+                                        state.mode = ExportImportMode::MainMenu;
+                                    }
+                                    Err(e) => {
+                                        let state = app.export_import_state.as_mut().unwrap();
+                                        state.status_message =
+                                            Some(format!("Failed to merge import data: {}", e));
+                                        state.is_error = true;
+                                        state.mode = ExportImportMode::MainMenu;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let state = app.export_import_state.as_mut().unwrap();
+                                state.status_message = Some(format!("Import failed: {}", e));
+                                state.is_error = true;
+                                state.mode = ExportImportMode::MainMenu;
+                            }
+                        }
+                    }
+                    false
+                }
+                KeyCode::Esc => {
+                    state.mode = ExportImportMode::ImportOptions;
+                    app.input_buffer.clear();
+                    false
+                }
+                KeyCode::Char(c) => {
+                    app.input_buffer.push(c);
+                    false
+                }
+                KeyCode::Backspace => {
+                    // Delete character if the buffer is not empty
+                    // If empty, do nothing but don't exit the popup
+                    if !app.input_buffer.is_empty() {
+                        app.input_buffer.pop();
+                    }
+                    // Always return false to prevent the backspace from
+                    // propagating and potentially triggering another handler
+                    false
+                }
+                KeyCode::Tab => {
+                    // Implement Tab completion
+                    complete_path(&mut app.input_buffer);
+                    false
+                }
+                _ => false,
+            }
+        }
+        ExportImportMode::ImportClipboard => {
+            match key.code {
+                KeyCode::Enter => {
+                    // Set the mode to importing
+                    {
+                        let state = app.export_import_state.as_mut().unwrap();
+                        state.mode = ExportImportMode::Importing;
+                    }
+
+                    // Store the overwrite value
+                    let overwrite = app.export_import_state.as_ref().unwrap().overwrite_existing;
+
+                    // Take ownership of the tag manager to avoid borrow issues
+                    let mut tag_manager_clone = app.tag_manager.clone();
+
+                    match import_from_clipboard() {
+                        Ok(Some(import_data)) => {
+                            // Use the function that handles tags
+                            match merge_import_into_database_with_tags(
+                                &mut app.snippet_database,
+                                &mut tag_manager_clone,
+                                import_data,
+                                overwrite,
+                            ) {
+                                Ok((notebooks, snippets)) => {
+                                    // Update the app's tag manager with the merged one
+                                    app.tag_manager = tag_manager_clone;
+
+                                    // Refresh the tree view
+                                    app.refresh_tree_items();
+
+                                    // Save database
+                                    let save_result = app.save_database();
+
+                                    // Update the status message and mode
+                                    let state = app.export_import_state.as_mut().unwrap();
+                                    if let Err(e) = save_result {
+                                        state.status_message = Some(format!(
+                                            "Import succeeded but failed to save database: {}",
+                                            e
+                                        ));
+                                        state.is_error = true;
+                                    } else {
+                                        state.status_message = Some(format!(
+                                            "Successfully imported {} notebooks and {} snippets from clipboard",
+                                            notebooks, snippets
+                                        ));
+                                        state.is_error = false;
+                                    }
+
+                                    state.mode = ExportImportMode::MainMenu;
+                                }
+                                Err(e) => {
+                                    let state = app.export_import_state.as_mut().unwrap();
+                                    state.status_message =
+                                        Some(format!("Failed to merge import data: {}", e));
+                                    state.is_error = true;
+                                    state.mode = ExportImportMode::MainMenu;
+                                }
+                            }
+                        }
+                        Ok(None) => {
+                            // Handle empty clipboard
+                            let state = app.export_import_state.as_mut().unwrap();
+                            state.status_message = Some("Clipboard is empty".to_string());
+                            state.is_error = true;
+                            state.mode = ExportImportMode::MainMenu;
+                        }
+                        Err(e) => {
+                            // Handle error
+                            let state = app.export_import_state.as_mut().unwrap();
+                            state.status_message = Some(format!("Clipboard import failed: {}", e));
+                            state.is_error = true;
+                            state.mode = ExportImportMode::MainMenu;
+                        }
+                    }
+                    false
+                }
+                KeyCode::Esc => {
+                    state.mode = ExportImportMode::MainMenu;
+                    state.selected_option = 2;
+                    false
+                }
+                _ => false,
+            }
+        }
+        ExportImportMode::Exporting | ExportImportMode::Importing => {
+            // We shouldn't normally reach here as these are transitional states
+            // But if we do, just go back to the main menu
+            state.mode = ExportImportMode::MainMenu;
+            false
+        }
+        // This mode is deprecated in favor of ImportPathPopup, but we need to handle it
+        ExportImportMode::ImportPath => {
+            // Just redirect to the popup version
+            state.mode = ExportImportMode::ImportPathPopup;
+            false
+        }
+    }
+}
+
+/// Function to handle path autocompletion
+fn complete_path(input_buffer: &mut String) {
+    let path_str = input_buffer.trim();
+
+    // If input is empty, use a default path
+    if path_str.is_empty() {
+        *input_buffer = "snippets_export.json".to_string();
+        return;
+    }
+
+    // Expand tilde to home directory
+    let expanded_path = if path_str.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(path_str.trim_start_matches("~/"))
+                .display()
+                .to_string()
+        } else {
+            path_str.to_string()
+        }
+    } else {
+        path_str.to_string()
+    };
+
+    // Get directory portion and filename portion
+    let (dir_path, file_prefix) = match expanded_path.rfind('/') {
+        Some(pos) => {
+            let (dir, file) = expanded_path.split_at(pos + 1);
+            (dir.to_string(), file.to_string())
+        }
+        None => {
+            // No slash, assume current directory
+            ("./".to_string(), expanded_path)
+        }
+    };
+
+    // Try to read the directory and find matching files
+    if let Ok(entries) = std::fs::read_dir(&dir_path) {
+        let mut matches = Vec::new();
+
+        // Collect all matching entries
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(&file_prefix) {
+                let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                let full_path = format!("{}{}", dir_path, name);
+
+                // Add slash to directories
+                let path_with_suffix = if is_dir {
+                    format!("{}/", full_path)
+                } else {
+                    full_path
+                };
+
+                matches.push((name, path_with_suffix, is_dir));
+            }
+        }
+
+        // Sort directories first, then files
+        matches.sort_by(|a, b| {
+            if a.2 && !b.2 {
+                std::cmp::Ordering::Less
+            } else if !a.2 && b.2 {
+                std::cmp::Ordering::Greater
+            } else {
+                a.0.cmp(&b.0)
+            }
+        });
+
+        // Complete with the first match if there's only one,
+        // or complete to the common prefix if there are multiple
+        if matches.len() == 1 {
+            *input_buffer = matches[0].1.clone();
+        } else if matches.len() > 1 {
+            // Find common prefix
+            let mut common_prefix = String::new();
+            if let Some(first_name) = matches.first().map(|m| &m.0) {
+                common_prefix = first_name.clone();
+
+                for (name, _, _) in &matches[1..] {
+                    // Find common characters between common_prefix and name
+                    let mut new_prefix = String::new();
+                    for (c1, c2) in common_prefix.chars().zip(name.chars()) {
+                        if c1 == c2 {
+                            new_prefix.push(c1);
+                        } else {
+                            break;
+                        }
+                    }
+                    common_prefix = new_prefix;
+
+                    if common_prefix.is_empty() {
+                        break;
+                    }
+                }
+            }
+
+            // Apply the common prefix if it's longer than the current prefix
+            if common_prefix.len() > file_prefix.len() {
+                *input_buffer = format!("{}{}", dir_path, common_prefix);
+            }
+        }
+    }
 }
