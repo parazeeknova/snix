@@ -8,3 +8,4 @@ pub mod favorites;
 pub mod notebook_details;
 pub mod search;
 pub mod start_page;
+pub mod backup_restore;

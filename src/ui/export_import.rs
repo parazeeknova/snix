@@ -50,7 +50,7 @@ pub enum ExportImportMode {
     ExportOptions,
     ExportPath,
     ImportOptions,
-    ImportPath,
+    _ImportPath,
     ImportClipboard,
     Exporting,
     Importing,
@@ -87,7 +87,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ExportImportMode::ExportOptions => render_export_options(frame, chunks[0], app),
         ExportImportMode::ExportPath => render_export_path(frame, chunks[0], app),
         ExportImportMode::ImportOptions => render_import_options(frame, chunks[0], app),
-        ExportImportMode::ImportPath => render_import_path(frame, chunks[0], app),
+        ExportImportMode::_ImportPath => render_import_path(frame, chunks[0], app),
         ExportImportMode::ImportClipboard => render_import_clipboard(frame, chunks[0], app),
         ExportImportMode::Exporting => render_exporting(frame, chunks[0], app),
         ExportImportMode::Importing => render_importing(frame, chunks[0], app),
@@ -639,7 +639,6 @@ fn render_importing(frame: &mut Frame, area: Rect, _app: &mut App) {
 
 /// Render the import path as a popup overlay
 fn render_import_path_popup(frame: &mut Frame, area: Rect, app: &mut App) {
-    // Create a popup window sized appropriately
     let popup_width = 70;
     let popup_height = 20;
 
@@ -707,8 +706,6 @@ fn render_import_path_popup(frame: &mut Frame, area: Rect, app: &mut App) {
 
     // Get potential path completions
     let path_str = app.input_buffer.trim();
-
-    // First add some suggested default files
     completion_suggestions.push("snippets_export.json - Default export file".to_string());
     completion_suggestions.push("~/Documents/snippets_export.json - Documents folder".to_string());
     completion_suggestions.push("~/Downloads/snippets_export.json - Downloads folder".to_string());
@@ -751,7 +748,6 @@ fn render_import_path_popup(frame: &mut Frame, area: Rect, app: &mut App) {
                     if is_dir {
                         completion_suggestions.push(format!("{}/", path));
                     } else if name.ends_with(".json") {
-                        // Only show json files as suggestions
                         completion_suggestions.push(path);
                     }
                 }
@@ -759,18 +755,13 @@ fn render_import_path_popup(frame: &mut Frame, area: Rect, app: &mut App) {
         }
     }
 
-    // Show completions
-    let items: Vec<String> = completion_suggestions
-        .into_iter()
-        .take(8) // Limit to 8 suggestions
-        .collect();
+    let items: Vec<String> = completion_suggestions.into_iter().take(8).collect();
 
     let suggestions_text =
         Paragraph::new(items.join("\n")).style(Style::default().fg(RosePine::TEXT));
 
     suggestions_text.render(inner_suggestions_area, frame.buffer_mut());
 
-    // Help text
     let help_text = Paragraph::new("Press Enter to import, Esc to cancel, Tab to autocomplete")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::MUTED));

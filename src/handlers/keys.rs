@@ -9,6 +9,7 @@ use crate::ui::colors::RosePine;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use crate::ui::backup_restore;
 
 /// Main keyboard event handler and dispatcher
 /// This is the primary entry point for all keyboard input processing. It receives
@@ -1333,6 +1334,10 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
 /// and provides convenient single-letter shortcuts for quick navigation to
 /// specific sections of the application.
 fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
+    // If backup/restore overlay is open, handle its keys first
+    if app.show_backup_restore_overlay {
+        return backup_restore::handle_backup_restore_keys(key, app);
+    }
     // Dismiss any messages with Enter key
     if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
     {
@@ -1356,52 +1361,48 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
         // Activate the currently selected menu item
         KeyCode::Enter => {
             match app.selected_menu_item {
-                // Navigate to Boilerplates page
-                0 => {
-                    app.navigate_to(AppState::Boilerplates);
-                    false
-                }
-
-                // Navigate to Marketplace page
-                1 => {
-                    app.navigate_to(AppState::Marketplace);
-                    false
-                }
-
-                // Navigate to Code Snippets page
-                2 => {
-                    app.navigate_to(AppState::CodeSnippets);
-                    false
-                }
-
-                // Navigate to Export/Import page
+                0 => app.navigate_to(AppState::Boilerplates),
+                1 => app.navigate_to(AppState::Marketplace),
+                2 => app.navigate_to(AppState::CodeSnippets),
                 3 => {
                     app.navigate_to(AppState::ExportImport);
                     app.export_import_state =
                         Some(crate::ui::export_import::ExportImportState::default());
-                    false
                 }
-
-                // Navigate to Info/About page
                 4 => {
-                    app.navigate_to(AppState::InfoPage);
-                    false
+                    app.show_backup_restore_overlay = true;
+                    if app.backup_restore_state.is_none() {
+                        app.backup_restore_state =
+                            Some(crate::ui::backup_restore::BackupRestoreState::default());
+                    }
                 }
-
-                // Navigate to Settings page
-                5 => {
-                    app.navigate_to(AppState::Settings);
-                    false
+                5 => app.navigate_to(AppState::InfoPage),
+                6 => app.navigate_to(AppState::Settings),
+                7 => return true, // Exit
+                _ => {}
+            }
+            false
+        }
+        KeyCode::Char('u') => {
+            app.show_backup_restore_overlay = true;
+            if app.backup_restore_state.is_none() {
+                app.backup_restore_state =
+                    Some(crate::ui::backup_restore::BackupRestoreState::default());
+            }
+            false
+        }
+        KeyCode::Esc => {
+            if app.show_backup_restore_overlay {
+                app.show_backup_restore_overlay = false;
+                false
+            } else {
+                app.clear_messages();
+                if app.can_go_back() {
+                    app.go_back();
                 }
-
-                // Exit application (last menu item)
-                6 => true,
-
-                // Safety fallback for any invalid menu indices
-                _ => false,
+                false
             }
         }
-
         // Quick navigation shortcuts
         KeyCode::Char('q') => {
             return true;
@@ -1788,7 +1789,7 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
                         state.mode = ExportImportMode::Exporting;
 
                         let options = ExportOptions {
-                            format: state.export_format,
+                            _format: state.export_format,
                             include_content: state.include_content,
                             notebook_ids: None,
                             include_favorites_only: state.favorites_only,
@@ -2076,7 +2077,7 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
         // This mode is deprecated in favor of ImportPathPopup, but we need to handle it
-        ExportImportMode::ImportPath => {
+        ExportImportMode::_ImportPath => {
             // Just redirect to the popup version
             state.mode = ExportImportMode::ImportPathPopup;
             false

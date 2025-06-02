@@ -20,7 +20,7 @@ pub enum ExportFormat {
 /// Export options for customizing what to export
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
-    pub format: ExportFormat,
+    pub _format: ExportFormat,
     pub include_content: bool,
     pub notebook_ids: Option<Vec<Uuid>>,
     pub include_favorites_only: bool,
@@ -29,7 +29,7 @@ pub struct ExportOptions {
 impl Default for ExportOptions {
     fn default() -> Self {
         Self {
-            format: ExportFormat::JSON,
+            _format: ExportFormat::JSON,
             include_content: true,
             notebook_ids: None,
             include_favorites_only: false,

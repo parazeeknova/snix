@@ -1,11 +1,7 @@
 //! UI Components and Layout Module
-//!
 //! This module contains all the reusable UI components and layout logic for the RustUI
 //! application. It provides functions for rendering complex interface elements like
 //! navigation bars, dialogs, and breadcrumb systems with consistent styling and behavior.
-//!
-//! # Components
-//!
 //! - **Bottom Navigation Bar**: Breadcrumb navigation and keyboard shortcuts
 //! - **Work-in-Progress Dialog**: Centered modal for pages under development
 //! - **Breadcrumb System**: Hierarchical navigation showing current location
@@ -20,8 +16,7 @@ use ratatui::{
     widgets::{Block, BorderType, Clear, Paragraph, Widget},
 };
 
-/// Renders the bottom navigation bar with breadcrumbs and keyboard shortcuts
-///
+/// Renders the bottom navigation bar with breadcrumbs and keyboard shortcut
 /// This function creates a comprehensive navigation bar at the bottom of the screen
 /// that serves two main purposes:
 /// 1. Shows breadcrumb navigation indicating the user's current location in the app
@@ -73,7 +68,7 @@ fn get_context_shortcuts(app: &mut App) -> String {
 
         (AppState::StartPage, InputMode::Normal) => {
             format!(
-                "{} [↑↓] Navigate │ [⏎] Select │ [/] Search │ [b] Boilerplates │ [s] Snippets │ [q] Quit ",
+                "{} [↑↓] Navigate │ [⏎] Select │ [/] Search │ [u] Backup │ [s] Snippets │ [q] Quit ",
                 back_hint
             )
         }
@@ -88,16 +83,13 @@ fn get_context_shortcuts(app: &mut App) -> String {
                 }
                 _ => {
                     if app.snippet_database.notebooks.is_empty() {
-                        format!(
-                            "{} [n] New Notebook │ [/] Search │ [h] Home │ [q] Quit ",
-                            back_hint
-                        )
+                        format!("{} [n 󰠮] │ [/ 󰭎] │ [h  ]│ [q 󰈆] ", back_hint)
                     } else {
                         // Check if a notebook is selected and can be collapsed/expanded
                         let collapse_text =
                             if let Some(TreeItem::Notebook(id, _)) = app.get_selected_item() {
                                 if app.is_notebook_collapsed(id) {
-                                    "[Space] Expand"
+                                    "[Space ]"
                                 } else if app
                                     .snippet_database
                                     .notebooks
@@ -105,26 +97,26 @@ fn get_context_shortcuts(app: &mut App) -> String {
                                     .map(|nb| !nb.children.is_empty() || nb.snippet_count > 0)
                                     .unwrap_or(false)
                                 {
-                                    "[Space] Collapse"
+                                    "[Space ]"
                                 } else {
-                                    "[Space] Fold"
+                                    "[Space ]"
                                 }
                             } else {
-                                "[Space] Fold"
+                                "[Space ]"
                             };
 
                         // Add move hints based on selected item
                         let move_hint =
                             if let Some(TreeItem::Notebook(_, _)) = app.get_selected_item() {
-                                "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
+                                "[Shift+↑] Pr │ [Shift+↓] Cd │ [Shift+←→] Sb"
                             } else if let Some(TreeItem::Snippet(_, _)) = app.get_selected_item() {
-                                "[Shift+↑] Parent │ [Shift+↓] Child │ [Shift+←→] Sibling"
+                                "[Shift+↑] Pr │ [Shift+↓] Cd │ [Shift+←→] Sb"
                             } else {
                                 ""
                             };
 
                         format!(
-                            "{} [n] Root │ [b] Nested │ [s] Snippet │ [f] Favorite │ {} │ {} │ [?] ",
+                            "{}[n 󰠮] │ [b └󰠮] │ [s 󰅨] │ [f ] │ {} │ {} │ [?] ",
                             back_hint, collapse_text, move_hint
                         )
                     }
@@ -153,7 +145,7 @@ fn get_context_shortcuts(app: &mut App) -> String {
                             back_hint
                         )
                     }
-                    ExportImportMode::ExportPath | ExportImportMode::ImportPath => {
+                    ExportImportMode::ExportPath | ExportImportMode::_ImportPath => {
                         format!("{} [⏎] Confirm │ [Esc] Back ", back_hint)
                     }
                     ExportImportMode::ImportClipboard => {
@@ -186,7 +178,6 @@ fn get_context_shortcuts(app: &mut App) -> String {
 }
 
 /// Constructs the breadcrumb navigation trail with appropriate styling and symbols
-///
 /// This function builds a visually rich breadcrumb navigation system that shows the user's
 /// current location within the application hierarchy. It uses a combination of symbols,
 /// colors, and background highlights to create an intuitive navigation experience.
@@ -226,7 +217,7 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
             }
             crate::app::AppState::CodeSnippets => {
                 spans.push(Span::styled(
-                    " Snippets ",
+                    "  Snippets ",
                     Style::default().fg(RosePine::BASE).bg(RosePine::IRIS),
                 ));
 
@@ -366,7 +357,7 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                                 Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),
                             ));
                         }
-                        ExportImportMode::ImportPath => {
+                        ExportImportMode::_ImportPath => {
                             spans.push(Span::styled(
                                 "  Import Path ",
                                 Style::default().fg(RosePine::BASE).bg(RosePine::LOVE),

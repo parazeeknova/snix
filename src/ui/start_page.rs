@@ -48,7 +48,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let content_chunks = Layout::vertical([
         Constraint::Fill(1),
-        Constraint::Length(8),
+        Constraint::Length(10),
         Constraint::Length(2),
         Constraint::Length(16),
         Constraint::Fill(1),
@@ -88,8 +88,6 @@ fn create_rustui_ascii_title() -> String {
 ╚════██║██║╚██╗██║██║ ██╔██╗
 ███████║██║ ╚████║██║██╔╝ ██╗
 ╚══════╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝
-
-          ⚡ Lightning Fast ⚡
 "#
     .to_string()
 }
@@ -126,6 +124,7 @@ fn render_menu(frame: &mut Frame, area: Rect, app: &App) {
         ("󰓜", "Marketplace", "m"),
         ("", "Code Snippets", "s"),
         ("", "Export/Import", "e"),
+        ("󱞁", "Backup & Restore", "u"),
         ("", "About", "i"),
         ("", "Settings", "c"),
         ("󰈆", "Exit", "q"),
@@ -188,6 +187,7 @@ fn render_description(frame: &mut Frame, area: Rect, app: &App) {
         "Discover community templates, frameworks, and starter projects",
         "Quick access to reusable code snippets and development patterns",
         "Import and export snippets/notebooks in JSON or YAML format",
+        "Backup and restore your data, view backup history, and manage backups",
         "Learn about snix's powerful boilerplate management features",
         "Customize your development workflow and preferences",
         "Save your work and exit the application",
@@ -223,7 +223,7 @@ fn render_recent_snippets(frame: &mut Frame, area: Rect, app: &App) {
     // Get most recently accessed snippets
     let mut recent_snippets: Vec<_> = app.snippet_database.snippets.values().collect();
     recent_snippets.sort_by(|a, b| b.accessed_at.cmp(&a.accessed_at));
-    recent_snippets.truncate(10); // Show 5 snippets instead of 3
+    recent_snippets.truncate(10);
 
     if recent_snippets.is_empty() {
         let empty_text = Paragraph::new("No snippets accessed yet. Press 's' to create some!")

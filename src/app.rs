@@ -1,5 +1,6 @@
 use crate::models::storage::SnippetDatabase;
 use crate::models::{CodeSnippet, Notebook, SnippetLanguage, StorageManager, TagManager};
+use crate::ui::backup_restore::BackupRestoreState;
 use crate::ui::export_import::ExportImportState;
 use crate::ui::{code_snippets, components, export_import, start_page};
 use chrono::{DateTime, Utc};
@@ -7,10 +8,8 @@ use ratatui::Frame;
 use uuid::Uuid;
 
 /// Application State Enumeration
-///
 /// Represents all possible states (pages) that the application can be in.
 /// Each variant corresponds to a different screen or page in the user interface.
-///
 /// This enum is used to track which page is currently active and to handle
 /// navigation between different sections of the application. The state determines
 /// which rendering function is called and what content is displayed to the user.
@@ -27,7 +26,6 @@ pub enum AppState {
 
 impl Default for AppState {
     /// Returns the default application state
-    ///
     /// The application always starts on the StartPage, which serves as the main
     /// navigation hub for accessing all other features and pages.
     fn default() -> Self {
@@ -50,16 +48,14 @@ pub enum CodeSnippetsState {
 /// Tree view item types for navigation
 #[derive(Debug, Clone, PartialEq)]
 pub enum TreeItem {
-    Notebook(Uuid, usize), // Added depth parameter for indentation
-    Snippet(Uuid, usize),  // Added depth parameter for indentation
+    Notebook(Uuid, usize),
+    Snippet(Uuid, usize),
 }
 
 /// Main Application State Container
-///
 /// This struct holds all the state information needed to run the application.
 /// It tracks the current page, menu selection, and navigation history to provide
 /// a smooth user experience with proper back navigation.
-///
 /// The App struct is the central hub for all state management and is passed
 /// to rendering functions to determine what content to display and how to
 /// style interactive elements based on the current state.
@@ -159,11 +155,9 @@ impl RecentSearchEntry {
 }
 
 /// Main Application State Container
-///
 /// This struct holds all the state information needed to run the application.
 /// It tracks the current page, menu selection, and navigation history to provide
 /// a smooth user experience with proper back navigation.
-///
 /// The App struct is the central hub for all state management and is passed
 /// to rendering functions to determine what content to display and how to
 /// style interactive elements based on the current state.
@@ -203,6 +197,8 @@ pub struct App {
     pub selected_recent_search: usize,
     pub tag_manager: TagManager,
     pub export_import_state: Option<ExportImportState>,
+    pub backup_restore_state: Option<BackupRestoreState>,
+    pub show_backup_restore_overlay: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -230,7 +226,6 @@ pub enum InputMode {
 
 impl App {
     /// Creates a new instance of the application with default initial state
-    ///
     /// Initializes the application in the StartPage state with the first menu item
     /// selected and an empty navigation history. This provides a clean starting
     /// point for the user interface.
@@ -281,6 +276,8 @@ impl App {
             selected_recent_search: 0,
             tag_manager,
             export_import_state: None,
+            backup_restore_state: None,
+            show_backup_restore_overlay: false,
         };
 
         app.refresh_tree_items();
@@ -288,35 +285,29 @@ impl App {
     }
 
     /// Moves the menu selection to the next item in a circular fashion
-    ///
     /// Increments the selected menu item index, wrapping around to 0 when it
     /// reaches the maximum number of menu items. This allows users to navigate
     /// through menu options using the down arrow or 'j' key.
-    ///
-    /// The total number of menu items is currently 7 (indices 0-6), so the
+    /// The total number of menu items is currently 8 (indices 0-7), so the
     /// selection will cycle through all available options.
     pub fn next_menu_item(&mut self) {
-        self.selected_menu_item = (self.selected_menu_item + 1) % 7;
+        self.selected_menu_item = (self.selected_menu_item + 1) % 8;
     }
 
     /// Moves the menu selection to the previous item in a circular fashion
-    ///
     /// Decrements the selected menu item index, wrapping around to the last item
     /// when it reaches 0. This allows users to navigate through menu options
     /// using the up arrow or 'k' key.
-    ///
-    /// The total number of menu items is currently 7 (indices 0-6), so the
+    /// The total number of menu items is currently 8 (indices 0-7), so the
     /// selection will cycle through all available options.
     pub fn previous_menu_item(&mut self) {
-        self.selected_menu_item = (self.selected_menu_item + 7 - 1) % 7;
+        self.selected_menu_item = (self.selected_menu_item + 8 - 1) % 8;
     }
 
     /// Navigates to a new application state and updates the page history
-    ///
     /// Changes the current application state to the specified new state, but only
     /// if it's different from the current state. The current state is saved to
     /// the page history stack before transitioning, enabling back navigation.
-    ///
     /// This method is the primary way to move between different pages in the
     /// application and ensures that navigation history is properly maintained.
     pub fn navigate_to(&mut self, new_state: AppState) {
@@ -333,11 +324,9 @@ impl App {
     }
 
     /// Navigates back to the previous page in the history stack
-    ///
     /// Pops the most recent state from the page history and sets it as the current
     /// state. This provides a standard "back" navigation experience similar to web
     /// browsers or mobile applications.
-    ///
     /// If there's no history to go back to (empty history stack), this method
     /// does nothing, preventing the application from getting into an invalid state.
     pub fn go_back(&mut self) {
@@ -347,7 +336,6 @@ impl App {
     }
 
     /// Checks whether back navigation is possible
-    ///
     /// Returns true if there are states in the page history stack that the user
     /// can navigate back to. This is useful for conditionally showing back buttons
     /// or enabling back navigation shortcuts.
@@ -667,18 +655,21 @@ impl App {
     }
 
     /// Renders the current application state to the terminal frame
-    ///
     /// This is the main entry point for all rendering in the application. It uses
     /// the current application state to determine which page-specific rendering
     /// function to call.
-    ///
     /// For the StartPage, it calls the dedicated start page renderer. For all other
     /// states, it displays a work-in-progress dialog with appropriate page titles
     /// and icons, maintaining consistent navigation while indicating that those
     /// features are under development.
     pub fn render(&mut self, frame: &mut Frame) {
         match self.state {
-            AppState::StartPage => start_page::render(frame, self),
+            AppState::StartPage => {
+                start_page::render(frame, self);
+                if self.show_backup_restore_overlay {
+                    crate::ui::backup_restore::render(frame, self);
+                }
+            }
             AppState::Boilerplates => {
                 components::render_wip_dialog(frame, frame.area(), "󰘦 Boilerplates", self)
             }
