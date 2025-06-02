@@ -1352,6 +1352,12 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
     if app.show_backup_restore_overlay {
         return backup_restore::handle_backup_restore_keys(key, app);
     }
+
+    // If About popup is open, handle its keys first
+    if app.show_about_popup {
+        return handle_about_popup_keys(key, app);
+    }
+
     // Dismiss any messages with Enter key
     if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
     {
@@ -1420,6 +1426,11 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
         // Quick navigation shortcuts
         KeyCode::Char('q') => {
             return true;
+        }
+
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            app.show_about_popup = true;
+            false
         }
 
         KeyCode::Char('b') => {
@@ -1503,6 +1514,45 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
                 launch_external_editor(app, snippet_id);
             }
 
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Handle keyboard input for the About popup
+fn handle_about_popup_keys(key: KeyEvent, app: &mut App) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.show_about_popup = false;
+            false
+        }
+        KeyCode::Tab => {
+            // Cycle through tabs
+            app.selected_about_tab = (app.selected_about_tab + 1) % 5; // 5 tabs total
+            false
+        }
+        KeyCode::BackTab => {
+            // Cycle backward through tabs
+            app.selected_about_tab = if app.selected_about_tab == 0 {
+                4
+            } else {
+                app.selected_about_tab - 1
+            };
+            false
+        }
+        KeyCode::Right => {
+            // Next tab
+            app.selected_about_tab = (app.selected_about_tab + 1) % 5;
+            false
+        }
+        KeyCode::Left => {
+            // Previous tab
+            app.selected_about_tab = if app.selected_about_tab == 0 {
+                4
+            } else {
+                app.selected_about_tab - 1
+            };
             false
         }
         _ => false,

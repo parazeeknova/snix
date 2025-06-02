@@ -11,10 +11,6 @@ use ratatui::{
 };
 
 /// Main rendering function for the start page
-///
-/// This is the primary entry point for rendering the start page UI. It orchestrates
-/// the layout of all visual elements and creates a cohesive, welcoming interface
-/// that serves as the application's main navigation hub.
 pub fn render(frame: &mut Frame, app: &mut App) {
     let main_area = frame.area();
 
@@ -26,16 +22,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let inner_area = block.inner(main_area);
     block.render(main_area, frame.buffer_mut());
-
-    // Adjust layout based on whether we have snippets to show
     let has_recent_snippets = !app.snippet_database.snippets.is_empty();
 
-    // Always show the bottom bar
     let main_chunks = Layout::vertical([
-        Constraint::Fill(1),   // Top section (title, menu)
-        Constraint::Length(2), // Description
-        Constraint::Length(if has_recent_snippets { 12 } else { 0 }), // Recent snippets (conditional)
-        Constraint::Length(3),                                        // Bottom bar (always shown)
+        Constraint::Fill(1),
+        Constraint::Length(2),
+        Constraint::Length(if has_recent_snippets { 12 } else { 0 }),
+        Constraint::Length(3),
     ])
     .split(inner_area);
 
@@ -68,7 +61,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_bottom_bar(frame, main_chunks[3], app);
 }
 
-/// Renders the ASCII art title with elegant typography
 fn render_title(frame: &mut Frame, area: Rect) {
     let title_text = create_rustui_ascii_title();
 
@@ -79,7 +71,6 @@ fn render_title(frame: &mut Frame, area: Rect) {
     title.render(area, frame.buffer_mut());
 }
 
-/// Generates the ASCII art representation of the application name
 fn create_rustui_ascii_title() -> String {
     r#"
 ███████╗███╗   ██╗██╗██╗  ██╗
@@ -92,7 +83,6 @@ fn create_rustui_ascii_title() -> String {
     .to_string()
 }
 
-/// Renders the application tagline and disclaimer
 fn render_disclaimer(frame: &mut Frame, area: Rect) {
     let disclaimer = "Fast ⚡ Boilerplate & Code snippets manager";
 
@@ -103,7 +93,6 @@ fn render_disclaimer(frame: &mut Frame, area: Rect) {
     disclaimer_paragraph.render(area, frame.buffer_mut());
 }
 
-/// Renders the interactive navigation menu with selection highlighting
 fn render_menu(frame: &mut Frame, area: Rect, app: &App) {
     let menu_area = Layout::horizontal([
         Constraint::Fill(1),
@@ -125,7 +114,6 @@ fn render_menu(frame: &mut Frame, area: Rect, app: &App) {
         ("", "Code Snippets", "s"),
         ("", "Export/Import", "e"),
         ("󱞁", "Backup & Restore", "u"),
-        ("", "About", "i"),
         ("", "Settings", "c"),
         ("󰈆", "Exit", "q"),
     ];
@@ -188,7 +176,6 @@ fn render_description(frame: &mut Frame, area: Rect, app: &App) {
         "Quick access to reusable code snippets and development patterns",
         "Import and export snippets/notebooks in JSON or YAML format",
         "Backup and restore your data, view backup history, and manage backups",
-        "Learn about snix's powerful boilerplate management features",
         "Customize your development workflow and preferences",
         "Save your work and exit the application",
     ];

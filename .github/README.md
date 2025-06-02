@@ -4,7 +4,7 @@
 
 <sub><sub>z</sub></sub><sub>z</sub>z
 
-Extremely fast, lightweight code snippets manager for developers, built with Rust for terminal
+Extremely fast, lightweight code snippets & boilerplate (soon!) manager for developers, built with rust for developers to access their code snippets quickly and efficiently.
 
 ## 🎨 Screenshots
 

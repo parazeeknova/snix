@@ -68,7 +68,7 @@ fn get_context_shortcuts(app: &mut App) -> String {
 
         (AppState::StartPage, InputMode::Normal) => {
             format!(
-                "{} [↑↓] Navigate │ [⏎] Select │ [/] Search │ [u] Backup │ [s] Snippets │ [q] Quit ",
+                "{} [↑↓] Navigate │ [⏎] Select │ [/] Search │ [u] Backup │ [a] About │ [s] Snippets │ [q] Quit ",
                 back_hint
             )
         }

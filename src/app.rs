@@ -181,6 +181,8 @@ pub struct App {
     pub selected_search_result: usize,
     pub show_favorites_only: bool,
     pub show_favorites_popup: bool,
+    pub show_about_popup: bool,
+    pub selected_about_tab: usize,
     pub error_message: Option<String>,
     pub success_message: Option<String>,
     pub input_buffer: String,
@@ -262,6 +264,8 @@ impl App {
             selected_search_result: 0,
             show_favorites_only: false,
             show_favorites_popup: false,
+            show_about_popup: false,
+            selected_about_tab: 0,
             error_message: None,
             success_message: None,
             input_buffer: String::new(),
@@ -682,13 +686,25 @@ impl App {
                 components::render_wip_dialog(frame, frame.area(), "󰓜 Marketplace", self)
             }
             AppState::CodeSnippets => code_snippets::render(frame, self),
+            AppState::ExportImport => export_import::render(frame, self),
             AppState::InfoPage => {
-                components::render_wip_dialog(frame, frame.area(), " About", self)
+                components::render_wip_dialog(frame, frame.area(), "ⓘ Information", self)
             }
             AppState::Settings => {
-                components::render_wip_dialog(frame, frame.area(), " Settings", self)
+                components::render_wip_dialog(frame, frame.area(), "⚙ Settings", self)
             }
-            AppState::ExportImport => export_import::render(frame, self),
+        }
+
+        // Show error message overlay if there is one
+        if let Some(msg) = &self.error_message {
+            crate::ui::code_snippets::render_message_overlay(frame, frame.area(), msg, true);
+        } else if let Some(msg) = &self.success_message {
+            crate::ui::code_snippets::render_message_overlay(frame, frame.area(), msg, false);
+        }
+
+        // Show About popup on any screen if it's enabled
+        if self.show_about_popup {
+            crate::ui::about::render_about(frame, self);
         }
     }
 

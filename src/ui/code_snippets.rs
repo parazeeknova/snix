@@ -634,7 +634,7 @@ pub fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
     ]
 }
 
-fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error: bool) {
+pub(crate) fn render_message_overlay(frame: &mut Frame, area: Rect, message: &str, is_error: bool) {
     let popup_area = spotlight_bar(70, area);
 
     Clear.render(popup_area, frame.buffer_mut());
