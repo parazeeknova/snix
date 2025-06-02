@@ -85,7 +85,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     match current_mode {
         ExportImportMode::MainMenu => render_main_menu(frame, chunks[0], app),
         ExportImportMode::ExportOptions => render_export_options(frame, chunks[0], app),
-        ExportImportMode::ExportPath => render_export_path(frame, chunks[0], app),
+        ExportImportMode::ExportPath => {
+            // First render the main menu as background
+            render_export_options(frame, chunks[0], app);
+            // Then render the export path popup
+            render_export_path(frame, main_area, app);
+        }
         ExportImportMode::ImportOptions => render_import_options(frame, chunks[0], app),
         ExportImportMode::_ImportPath => render_import_path(frame, chunks[0], app),
         ExportImportMode::ImportClipboard => render_import_clipboard(frame, chunks[0], app),
@@ -99,10 +104,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    // Render the bottom bar
     render_bottom_bar(frame, chunks[1], app);
-
-    // Render status message if present
     if let Some(message) = &status_message {
         render_status_message(frame, main_area, message, is_error);
     }
@@ -134,11 +136,10 @@ fn render_main_menu(frame: &mut Frame, area: Rect, app: &mut App) {
 
     title.render(content_chunks[0], frame.buffer_mut());
 
-    // Menu options with shortcut keys
     let menu_items = vec![
         (
-            "  [E] Export to JSON",
-            "Export snippets and notebooks to a JSON file",
+            "  [E] Export to File",
+            "Export snippets and notebooks to JSON, YAML, or TOML format",
         ),
         (
             "  [F] Import from File",
@@ -211,14 +212,27 @@ fn render_export_options(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .split(content_area);
 
-    // Title
-    let title = Paragraph::new("Export Options (JSON)")
+    // Title with format indicator
+    let format_name = match export_import_state.export_format {
+        ExportFormat::JSON => "JSON",
+        ExportFormat::YAML => "YAML",
+        ExportFormat::TOML => "TOML",
+    };
+    let title = Paragraph::new(format!("Export Options (Format: {})", format_name))
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::GOLD).bold());
 
     title.render(content_chunks[0], frame.buffer_mut());
 
-    // Options
+    let format_label = format!(
+        "Change format (current: {})",
+        match export_import_state.export_format {
+            ExportFormat::JSON => "JSON",
+            ExportFormat::YAML => "YAML",
+            ExportFormat::TOML => "TOML",
+        }
+    );
+
     let options = vec![
         (
             "Include snippet content",
@@ -229,6 +243,11 @@ fn render_export_options(frame: &mut Frame, area: Rect, app: &mut App) {
             "Export favorites only",
             export_import_state.favorites_only,
             "Only export snippets that are marked as favorites",
+        ),
+        (
+            format_label.as_str(),
+            true,
+            "Cycle between JSON, YAML, and TOML export formats",
         ),
         (
             "Continue to select export path",
@@ -288,71 +307,122 @@ fn render_export_options(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_stateful_widget(options_list, content_chunks[1], &mut list_state);
 }
 
-/// Render the export path input screen
+/// Path input for export
 fn render_export_path(frame: &mut Frame, area: Rect, app: &mut App) {
-    let content_area = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(70),
-        Constraint::Fill(1),
+    let popup_width = 70;
+    let popup_height = 20;
+
+    let popup_area = Rect::new(
+        (area.width.saturating_sub(popup_width)) / 2,
+        (area.height.saturating_sub(popup_height)) / 2,
+        popup_width.min(area.width),
+        popup_height.min(area.height),
+    );
+
+    // Clear the area where popup will be drawn
+    Clear.render(popup_area, frame.buffer_mut());
+
+    // Create a popup block
+    let popup_block = Block::bordered()
+        .title(" Export Path ")
+        .title_alignment(Alignment::Center)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::IRIS));
+
+    let inner_area = popup_block.inner(popup_area);
+    popup_block.render(popup_area, frame.buffer_mut());
+
+    // Create a layout for the content
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // Header text
+        Constraint::Length(3), // Path input area
+        Constraint::Length(1), // Empty space
+        Constraint::Length(3), // File format selection
+        Constraint::Length(1), // Empty space
+        Constraint::Length(8), // Instructions
+        Constraint::Min(1),    // Status line
     ])
-    .split(area)[1];
+    .split(inner_area);
 
-    let content_chunks = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(5),
-        Constraint::Length(6),
-        Constraint::Fill(1),
-    ])
-    .split(content_area);
-
-    // Title
-    let title = Paragraph::new("Export Path")
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(RosePine::GOLD).bold());
-
-    title.render(content_chunks[0], frame.buffer_mut());
+    // Header text
+    let header = Paragraph::new("Enter the export file path:")
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(RosePine::TEXT).bold());
+    header.render(chunks[0], frame.buffer_mut());
 
     // Path input field
     let input_block = Block::bordered()
-        .title(" Enter export file path ")
-        .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .style(Style::default().fg(RosePine::SUBTLE));
+        .style(Style::default().fg(RosePine::FOAM));
 
-    let inner_input_area = input_block.inner(content_chunks[1]);
-    input_block.render(content_chunks[1], frame.buffer_mut());
+    // Get the inner area before rendering
+    let input_area = input_block.inner(chunks[1]);
+    input_block.render(chunks[1], frame.buffer_mut());
 
-    let input_text = Paragraph::new(&*app.input_buffer).style(Style::default().fg(RosePine::TEXT));
+    let input_text = Paragraph::new(app.input_buffer.as_str())
+        .style(Style::default().fg(RosePine::TEXT))
+        .alignment(Alignment::Left);
+    input_text.render(input_area, frame.buffer_mut());
 
-    input_text.render(inner_input_area, frame.buffer_mut());
-
-    // Default location suggestions
-    let suggestion_block = Block::bordered()
-        .title(" Suggested locations ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .style(Style::default().fg(RosePine::SUBTLE));
-
-    let inner_suggestion_area = suggestion_block.inner(content_chunks[2]);
-    suggestion_block.render(content_chunks[2], frame.buffer_mut());
-
-    let suggestions = [
-        "snippets_export.json - Default export file",
-        "~/Documents/snippets_export.json - Documents folder",
-        "~/Downloads/snippets_export.json - Downloads folder",
+    let export_state = app.export_import_state.as_ref().unwrap();
+    let formats = vec![
+        ("JSON", ExportFormat::JSON),
+        ("YAML", ExportFormat::YAML),
+        ("TOML", ExportFormat::TOML),
     ];
 
-    let suggestion_text =
-        Paragraph::new(suggestions.join("\n")).style(Style::default().fg(RosePine::TEXT));
+    let format_area = chunks[3];
+    let format_width = format_area.width / formats.len() as u16;
+    let format_chunks = Layout::horizontal(
+        formats
+            .iter()
+            .map(|_| Constraint::Length(format_width))
+            .collect::<Vec<_>>(),
+    )
+    .split(format_area);
 
-    suggestion_text.render(inner_suggestion_area, frame.buffer_mut());
+    for (i, (label, format)) in formats.iter().enumerate() {
+        let is_selected = export_state.export_format == *format;
+        let style = if is_selected {
+            Style::default()
+                .fg(RosePine::BASE)
+                .bg(RosePine::IRIS)
+                .bold()
+        } else {
+            Style::default().fg(RosePine::TEXT)
+        };
 
-    // Help text
-    let help_text = Paragraph::new("Press Enter to confirm, Esc to cancel")
-        .alignment(Alignment::Center)
+        let format_text = format!(" {} ", label);
+        let format_para = Paragraph::new(format_text)
+            .alignment(Alignment::Center)
+            .style(style);
+
+        format_para.render(format_chunks[i], frame.buffer_mut());
+    }
+
+    // Instructions
+    let instructions = vec![
+        "• Press Enter to confirm the path",
+        "• Press Tab to cycle through format options",
+        "• File extension will be updated automatically based on format",
+        "• Press Escape to go back to export options",
+        "",
+        "The file will be created if it doesn't exist.",
+        "Directory must already exist.",
+    ];
+
+    let instructions_text = instructions.join("\n");
+    let instructions_para = Paragraph::new(instructions_text)
+        .alignment(Alignment::Left)
         .style(Style::default().fg(RosePine::MUTED));
+    instructions_para.render(chunks[5], frame.buffer_mut());
 
-    help_text.render(content_chunks[3], frame.buffer_mut());
+    // Status line (key help)
+    let status_text = "Tab: Change Format • Enter: Confirm • Esc: Back";
+    let status = Paragraph::new(status_text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(RosePine::SUBTLE));
+    status.render(chunks[6], frame.buffer_mut());
 }
 
 /// Render the import options screen
@@ -614,7 +684,6 @@ fn render_importing(frame: &mut Frame, area: Rect, _app: &mut App) {
     ])
     .split(content_area);
 
-    // Title
     let title = Paragraph::new("Importing...")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::GOLD).bold());

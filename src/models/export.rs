@@ -15,6 +15,8 @@ use crate::models::{CodeSnippet, Notebook, TagManager};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExportFormat {
     JSON,
+    YAML,
+    TOML,
 }
 
 /// Export options for customizing what to export
@@ -139,10 +141,24 @@ pub fn export_database_with_tags(
 ) -> Result<()> {
     let export_data = ExportData::from_database_with_tags(db, tag_manager, options);
 
-    // Export as JSON
-    let json = serde_json::to_string_pretty(&export_data)
-        .context("Failed to serialize database to JSON")?;
-    fs::write(path, json).context("Failed to write JSON export file")?;
+    // Export based on format
+    match options._format {
+        ExportFormat::JSON => {
+            let json = serde_json::to_string_pretty(&export_data)
+                .context("Failed to serialize database to JSON")?;
+            fs::write(path, json).context("Failed to write JSON export file")?;
+        }
+        ExportFormat::YAML => {
+            let yaml = serde_yaml::to_string(&export_data)
+                .context("Failed to serialize database to YAML")?;
+            fs::write(path, yaml).context("Failed to write YAML export file")?;
+        }
+        ExportFormat::TOML => {
+            let toml = toml::to_string_pretty(&export_data)
+                .context("Failed to serialize database to TOML")?;
+            fs::write(path, toml).context("Failed to write TOML export file")?;
+        }
+    }
 
     Ok(())
 }
@@ -155,13 +171,41 @@ pub fn import_database(path: &Path) -> Result<ExportData> {
         .context("Failed to read import file")?;
 
     // Try to determine format from file extension
-    if path.extension().map_or(false, |ext| ext == "json") {
-        let data = serde_json::from_str(&contents).context("Failed to parse JSON import file")?;
-        Ok(data)
-    } else {
-        // Try JSON
-        serde_json::from_str(&contents).context("Failed to parse import file as JSON")
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        match ext.to_lowercase().as_str() {
+            "json" => {
+                let data =
+                    serde_json::from_str(&contents).context("Failed to parse JSON import file")?;
+                return Ok(data);
+            }
+            "yaml" | "yml" => {
+                let data =
+                    serde_yaml::from_str(&contents).context("Failed to parse YAML import file")?;
+                return Ok(data);
+            }
+            "toml" => {
+                let data = toml::from_str(&contents).context("Failed to parse TOML import file")?;
+                return Ok(data);
+            }
+            _ => {}
+        }
     }
+
+    if let Ok(data) = serde_json::from_str(&contents) {
+        return Ok(data);
+    }
+
+    if let Ok(data) = serde_yaml::from_str(&contents) {
+        return Ok(data);
+    }
+
+    if let Ok(data) = toml::from_str(&contents) {
+        return Ok(data);
+    }
+
+    Err(anyhow::anyhow!(
+        "Failed to parse import file as JSON, YAML, or TOML"
+    ))
 }
 
 /// Merge imported data into existing database

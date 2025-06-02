@@ -180,6 +180,7 @@ pub struct App {
     pub search_results: Vec<SearchResult>,
     pub selected_search_result: usize,
     pub show_favorites_only: bool,
+    pub show_favorites_popup: bool,
     pub error_message: Option<String>,
     pub success_message: Option<String>,
     pub input_buffer: String,
@@ -260,6 +261,7 @@ impl App {
             search_results: Vec::new(),
             selected_search_result: 0,
             show_favorites_only: false,
+            show_favorites_popup: false,
             error_message: None,
             success_message: None,
             input_buffer: String::new(),
@@ -668,6 +670,9 @@ impl App {
                 start_page::render(frame, self);
                 if self.show_backup_restore_overlay {
                     crate::ui::backup_restore::render(frame, self);
+                }
+                if self.show_favorites_popup {
+                    crate::ui::favorites::render_floating_favorites(frame, self);
                 }
             }
             AppState::Boilerplates => {

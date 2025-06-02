@@ -36,6 +36,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             if app.input_mode == InputMode::Search {
                 search::render_floating_search(frame, app);
             }
+
+            // If favorites popup is active, render it on top
+            if app.show_favorites_popup {
+                crate::ui::favorites::render_floating_favorites(frame, app);
+            }
         }
         CodeSnippetsState::NotebookView { notebook_id } => {
             render_notebook_view(frame, main_area, app, notebook_id);
@@ -43,6 +48,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             // If search mode is active, render the floating search dialog on top
             if app.input_mode == InputMode::Search {
                 search::render_floating_search(frame, app);
+            }
+
+            // If favorites popup is active, render it on top
+            if app.show_favorites_popup {
+                crate::ui::favorites::render_floating_favorites(frame, app);
             }
         }
         CodeSnippetsState::NotebookDetails { notebook_id } => {
@@ -52,9 +62,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             if app.input_mode == InputMode::Search {
                 search::render_floating_search(frame, app);
             }
+
+            // If favorites popup is active, render it on top
+            if app.show_favorites_popup {
+                crate::ui::favorites::render_floating_favorites(frame, app);
+            }
         }
         CodeSnippetsState::_SnippetEditor { snippet_id } => {
             render_snippet_editor(frame, main_area, app, snippet_id);
+
+            // If favorites popup is active, render it on top
+            if app.show_favorites_popup {
+                crate::ui::favorites::render_floating_favorites(frame, app);
+            }
         }
         CodeSnippetsState::_CreateNotebook => render_create_notebook_dialog(frame, main_area, app),
         CodeSnippetsState::CreateSnippet { notebook_id } => {
@@ -327,6 +347,14 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         Line::from(vec![
             Span::styled("  /   ", Style::default().fg(RosePine::GOLD)),
             Span::raw("Search snippets"),
+        ]),
+        Line::from(vec![
+            Span::styled("  f   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Toggle favorite status"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+F", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Show favorites popup"),
         ]),
         Line::from(vec![
             Span::styled("  r   ", Style::default().fg(RosePine::GOLD)),

@@ -16,7 +16,7 @@ impl RosePine {
     pub const ROSE: Color = Color::Rgb(235, 188, 186);
     pub const FOAM: Color = Color::Rgb(156, 207, 216);
     pub const IRIS: Color = Color::Rgb(196, 167, 231);
-    // pub const PINE: Color = Color::Rgb(121, 179, 167);
+    pub const PINE: Color = Color::Rgb(121, 179, 167);
     pub const HIGHLIGHT_HIGH: Color = Color::Rgb(82, 79, 103);
     pub const HIGHLIGHT_LOW: Color = Color::Rgb(33, 32, 46);
 }

@@ -5,11 +5,13 @@
 
 use crate::app::{App, AppState, CodeSnippetsState, InputMode, RecentSearchEntry, TreeItem};
 use crate::models::SnippetLanguage;
+use crate::models::export::ExportFormat;
+use crate::ui::backup_restore;
 use crate::ui::colors::RosePine;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use crate::ui::backup_restore;
 
 /// Main keyboard event handler and dispatcher
 /// This is the primary entry point for all keyboard input processing. It receives
@@ -557,6 +559,17 @@ fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
 
 /// Handles keys for the main notebook list view
 fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
+    // If search mode is active, handle search keys
+    if app.input_mode == InputMode::Search {
+        return handle_search_keys(key, app);
+    }
+
+    // Close floating favorites window if it's open
+    if app.show_favorites_popup && key.code == KeyCode::Esc {
+        app.show_favorites_popup = false;
+        return false;
+    }
+
     // Check if we have a pending confirmation
     if app.has_pending_action() {
         match key.code {
@@ -591,11 +604,6 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             }
             _ => {}
         }
-    }
-
-    // If search mode is active, handle search keys
-    if app.input_mode == InputMode::Search {
-        return handle_search_keys(key, app);
     }
 
     match key.code {
@@ -827,6 +835,12 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             app.refresh_tree_items();
             let status = if app.show_favorites_only { "on" } else { "off" };
             app.set_success_message(format!("Favorites filter: {}", status));
+            false
+        }
+
+        // Show floating favorites window with Shift+F
+        KeyCode::Char('F') | KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            app.show_favorites_popup = !app.show_favorites_popup;
             false
         }
 
@@ -1657,8 +1671,7 @@ fn get_available_colors() -> Vec<(&'static str, ratatui::style::Color)> {
 /// Handles keyboard input for the export/import page
 fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
     use crate::models::{
-        ExportFormat, ExportOptions, export_database_with_tags, import_database,
-        import_from_clipboard, merge_import_into_database_with_tags,
+        import_database, import_from_clipboard, merge_import_into_database_with_tags,
     };
     use crate::ui::export_import::{ExportImportMode, ExportImportState};
     use std::path::Path;
@@ -1669,9 +1682,6 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
     }
 
     let state = app.export_import_state.as_mut().unwrap();
-
-    // Set JSON as the default export format
-    state.export_format = ExportFormat::JSON;
 
     // If we have a status message showing, any key dismisses it
     if state.status_message.is_some() {
@@ -1746,7 +1756,7 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
                     false
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    state.selected_option = (state.selected_option + 1).min(2);
+                    state.selected_option = (state.selected_option + 1).min(3);
                     false
                 }
                 KeyCode::Enter => {
@@ -1762,8 +1772,38 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
                             false
                         }
                         2 => {
+                            // Cycle through formats
+                            state.export_format = match state.export_format {
+                                ExportFormat::JSON => ExportFormat::YAML,
+                                ExportFormat::YAML => ExportFormat::TOML,
+                                ExportFormat::TOML => ExportFormat::JSON,
+                            };
+                            false
+                        }
+                        3 => {
                             // Continue to path selection
                             state.mode = ExportImportMode::ExportPath;
+
+                            // Set the default extension based on the selected format
+                            let extension = match state.export_format {
+                                ExportFormat::JSON => "json",
+                                ExportFormat::YAML => "yaml",
+                                ExportFormat::TOML => "toml",
+                            };
+
+                            // Update the export path with the correct extension
+                            let path = state.export_path.clone();
+                            if let Some(file_stem) = path.file_stem() {
+                                let file_stem_str = file_stem.to_string_lossy();
+                                if let Some(parent) = path.parent() {
+                                    state.export_path =
+                                        parent.join(format!("{}.{}", file_stem_str, extension));
+                                } else {
+                                    state.export_path =
+                                        PathBuf::from(format!("{}.{}", file_stem_str, extension));
+                                }
+                            }
+
                             app.input_buffer = state.export_path.to_string_lossy().to_string();
                             false
                         }
@@ -1781,50 +1821,86 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
         ExportImportMode::ExportPath => {
             match key.code {
                 KeyCode::Enter => {
-                    if !app.input_buffer.is_empty() {
-                        let path = Path::new(&app.input_buffer);
-                        state.export_path = path.to_path_buf();
+                    let path = PathBuf::from(app.input_buffer.trim());
+                    state.export_path = path.to_path_buf();
+                    app.input_buffer.clear();
 
-                        // Perform the export
-                        state.mode = ExportImportMode::Exporting;
+                    state.mode = ExportImportMode::Exporting;
 
-                        let options = ExportOptions {
-                            _format: state.export_format,
-                            include_content: state.include_content,
-                            notebook_ids: None,
-                            include_favorites_only: state.favorites_only,
-                        };
+                    // Create options
+                    let options = crate::models::export::ExportOptions {
+                        _format: state.export_format,
+                        include_content: state.include_content,
+                        notebook_ids: None,
+                        include_favorites_only: state.favorites_only,
+                    };
 
-                        // Clone the tag manager to avoid borrow issues
-                        let tag_manager_clone = app.tag_manager.clone();
-
-                        // Use the function that includes tag information
-                        match export_database_with_tags(
-                            &app.snippet_database,
-                            &tag_manager_clone,
-                            &state.export_path,
-                            &options,
-                        ) {
-                            Ok(_) => {
-                                state.status_message = Some(format!(
-                                    "Export saved to {}",
-                                    state.export_path.display()
-                                ));
-                                state.is_error = false;
-                                state.mode = ExportImportMode::MainMenu;
-                            }
-                            Err(e) => {
-                                state.status_message = Some(format!("Export failed: {}", e));
-                                state.is_error = true;
-                                state.mode = ExportImportMode::MainMenu;
-                            }
-                        }
+                    // Export
+                    if let Err(e) = crate::models::export::export_database_with_tags(
+                        &app.snippet_database,
+                        &app.tag_manager,
+                        &state.export_path,
+                        &options,
+                    ) {
+                        state.status_message = Some(format!("Export failed: {}", e));
+                        state.is_error = true;
+                    } else {
+                        state.status_message = Some(format!(
+                            "Export successful! Saved to {}",
+                            state.export_path.display()
+                        ));
+                        state.is_error = false;
                     }
+
+                    state.mode = ExportImportMode::MainMenu;
                     false
                 }
                 KeyCode::Esc => {
-                    state.mode = ExportImportMode::ExportOptions;
                     app.input_buffer.clear();
+                    state.mode = ExportImportMode::ExportOptions;
+                    false
+                }
+                KeyCode::Tab => {
+                    // Cycle through formats: JSON -> YAML -> TOML -> JSON
+                    state.export_format = match state.export_format {
+                        ExportFormat::JSON => ExportFormat::YAML,
+                        ExportFormat::YAML => ExportFormat::TOML,
+                        ExportFormat::TOML => ExportFormat::JSON,
+                    };
+
+                    // Update file extension based on format
+                    if !app.input_buffer.is_empty() {
+                        let path = PathBuf::from(app.input_buffer.trim());
+                        let file_stem = path
+                            .file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+
+                        let extension = match state.export_format {
+                            ExportFormat::JSON => "json",
+                            ExportFormat::YAML => "yaml",
+                            ExportFormat::TOML => "toml",
+                        };
+
+                        app.input_buffer = if let Some(parent) = path.parent() {
+                            if parent.as_os_str().is_empty() {
+                                format!("{}.{}", file_stem, extension)
+                            } else {
+                                format!("{}/{}.{}", parent.display(), file_stem, extension)
+                            }
+                        } else {
+                            format!("{}.{}", file_stem, extension)
+                        };
+                    } else {
+                        // If input buffer is empty, create a default filename with correct extension
+                        let filename = match state.export_format {
+                            ExportFormat::JSON => "snippets_export.json",
+                            ExportFormat::YAML => "snippets_export.yaml",
+                            ExportFormat::TOML => "snippets_export.toml",
+                        };
+                        app.input_buffer = filename.to_string();
+                    }
                     false
                 }
                 KeyCode::Char(c) => {
@@ -2116,7 +2192,7 @@ fn complete_path(input_buffer: &mut String) {
         }
         None => {
             // No slash, assume current directory
-            ("./".to_string(), expanded_path)
+            ("./".to_string(), expanded_path.to_string())
         }
     };
 

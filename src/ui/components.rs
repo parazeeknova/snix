@@ -116,7 +116,7 @@ fn get_context_shortcuts(app: &mut App) -> String {
                             };
 
                         format!(
-                            "{}[n 󰠮] │ [b └󰠮] │ [s 󰅨] │ [f ] │ {} │ {} │ [?] ",
+                            "{}[n/b 󰠮] │ [s 󰅨] │ [f / Shift+F ] │ {} │ {} │ [?] ",
                             back_hint, collapse_text, move_hint
                         )
                     }

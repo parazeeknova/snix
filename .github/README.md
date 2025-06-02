@@ -1,18 +1,10 @@
-<div align="center">
+# Snix
 
-  ## Snix ⚡
-  **Fast terminal-based boilerplate and code snippet manager for developers**
-</div>
+<img src="./assets/snix_rust.png" alt="Snix Logo" width="100%">
 
-<div align="center">
-  
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](#)
+<sub><sub>z</sub></sub><sub>z</sub>z
 
-</div>
-
-Snix is a modern, fast, and intuitive terminal user interface for managing development boilerplates, project templates, and code snippets. Built with Rust and powered by [ratatui](https://github.com/ratatui-org/ratatui), it provides developers with a centralized tool to streamline their development workflow.
+Extremely fast, lightweight code snippets manager for developers, built with Rust for terminal
 
 ## 🎨 Screenshots
 
