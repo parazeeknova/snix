@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   bump-version-and-release:
     runs-on: ubuntu-latest
@@ -28,34 +31,45 @@ jobs:
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           git push
 
+      - name: Get latest commit message
+        run: git log -1 --pretty=%B > commit_message.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.bump.outputs.new_version }}
           name: Release v${{ steps.bump.outputs.new_version }}
+          body_path: commit_message.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build:
+  build-and-upload:
     needs: bump-version-and-release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
-      - name: Build
-        run: cargo build --release
-      - name: Upload release asset
+
+      - name: Install cross
+        run: cargo install cross --locked
+
+      - name: Build all targets using scripts/build.rs
+        run: |
+          rustc scripts/build.rs -o build-script
+          ./build-script
+
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            target/release/snix*
-            target\\release\\snix.exe
+            release-builds/snix-linux
+            release-builds/snix-windows.exe
+            release-builds/snix-macos
+            release-builds/snix-binaries.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
