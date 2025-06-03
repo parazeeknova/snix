@@ -91,6 +91,9 @@ jobs:
       - name: Build macOS binary
         run: cargo build --release
 
+      - name: Ensure release-builds directory exists
+        run: mkdir -p release-builds
+
       - name: Get version and git hash for asset renaming
         id: versionhash
         run: |

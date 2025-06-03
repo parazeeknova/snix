@@ -39,7 +39,6 @@ fn main() {
         } else {
             "snix"
         };
-        let src_path = format!("target/{}/release/{}", target, bin_name);
         let dest_path = format!(
             "{}/{}-{}-git{}",
             out_dir,
@@ -56,6 +55,7 @@ fn main() {
         } else {
             dest_path
         };
+        let src_path = format!("target/{}/release/{}", target, bin_name);
         fs::copy(&src_path, &dest_path)
             .expect(&format!("Failed to copy {} to {}", src_path, dest_path));
         println!("Copied {} to {}", src_path, dest_path);
@@ -84,10 +84,8 @@ fn main() {
                 name
             })
             .collect();
-        let mut args = vec![
-            "-j",
-            &format!("{}/snix-binaries-{}-git{}.zip", out_dir, version, git_hash),
-        ];
+        let zip_name = format!("{}/snix-binaries-{}-git{}.zip", out_dir, version, git_hash);
+        let mut args = vec!["-j", &zip_name];
         args.extend(zip_files.iter().map(|s| s.as_str()));
         let zip_status = Command::new("zip")
             .args(&args)
