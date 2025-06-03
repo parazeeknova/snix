@@ -70,9 +70,9 @@ jobs:
         with:
           tag_name: v${{ needs.bump-version-and-release.outputs.version }}
           files: |
-            release-builds/snix-linux
-            release-builds/snix-windows.exe
-            release-builds/snix-binaries.zip
+            release-builds/snix-linux-*-git*
+            release-builds/snix-windows-*-git*.exe
+            release-builds/snix-binaries-*-git*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -91,10 +91,17 @@ jobs:
       - name: Build macOS binary
         run: cargo build --release
 
+      - name: Get version and git hash for asset renaming
+        id: versionhash
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -1 | cut -d'"' -f2)
+          GITHASH=$(git rev-parse --short HEAD)
+          cp target/release/snix release-builds/snix-macos-$VERSION-git$GITHASH
+
       - name: Upload macOS release asset
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.bump-version-and-release.outputs.version }}
-          files: target/release/snix
+          files: release-builds/snix-macos-*-git*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
