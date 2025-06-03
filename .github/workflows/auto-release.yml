@@ -1,0 +1,61 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  bump-version-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        id: bump
+        run: |
+          chmod +x .github/scripts/bump_version.sh
+          new_version=$(.github/scripts/bump_version.sh)
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+
+      - name: Commit version bump
+        run: |
+          git add Cargo.toml
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          git push
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.new_version }}
+          name: Release v${{ steps.bump.outputs.new_version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: bump-version-and-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Build
+        run: cargo build --release
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/snix*
+            target\\release\\snix.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

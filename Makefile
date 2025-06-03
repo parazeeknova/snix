@@ -16,4 +16,4 @@ release:
 	cargo build --release
 
 install: release
-	cp target/release/snix ~/.local/bin/ 
+	cp target/release/snix ~/.local/bin/
