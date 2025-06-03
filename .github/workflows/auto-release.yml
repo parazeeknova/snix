@@ -10,6 +10,8 @@ permissions:
 jobs:
   bump-version-and-release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.new_version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +45,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-and-upload:
+  build-and-upload-linux:
     needs: bump-version-and-release
     runs-on: ubuntu-latest
     steps:
@@ -63,13 +65,36 @@ jobs:
           rustc scripts/build.rs -o build-script
           ./build-script
 
-      - name: Upload release assets
+      - name: Upload Linux and Windows release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.bump-version-and-release.outputs.version }}
           files: |
             release-builds/snix-linux
             release-builds/snix-windows.exe
-            release-builds/snix-macos
             release-builds/snix-binaries.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-upload-macos:
+    needs: bump-version-and-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Build macOS binary
+        run: cargo build --release
+
+      - name: Upload macOS release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.bump-version-and-release.outputs.version }}
+          files: target/release/snix
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

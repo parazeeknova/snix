@@ -6,7 +6,6 @@ fn main() {
     let targets = vec![
         ("x86_64-unknown-linux-gnu", "snix-linux"),
         ("x86_64-pc-windows-gnu", "snix-windows.exe"),
-        ("x86_64-apple-darwin", "snix-macos"),
     ];
 
     let out_dir = "release-builds";
@@ -47,7 +46,6 @@ fn main() {
                 &format!("{}/snix-binaries.zip", out_dir),
                 &format!("{}/snix-linux", out_dir),
                 &format!("{}/snix-windows.exe", out_dir),
-                &format!("{}/snix-macos", out_dir),
             ])
             .status()
             .expect("Failed to zip binaries");
