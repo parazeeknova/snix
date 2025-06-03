@@ -1,0 +1,11 @@
+services:
+  snix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: snix
+    stdin_open: true
+    tty: true
+    environment:
+      - TERM=xterm-256color
+      - COMPOSE_BAKE=true

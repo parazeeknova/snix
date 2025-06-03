@@ -14,6 +14,19 @@ Snix is a extremely fast code snippets & boilerplate manager (soon!) for your te
 
 <br />
 
+## Features
+- **Extremely fast**: Snix is built with performance in mind, ensuring that you can access your snippets quickly.
+- **Create and manage notebooks**: Organize your snippets into notebooks for better categorization.
+- **Create and manage snippets**: Add, edit, and delete snippets with ease.
+- **Search snippets**: Quickly find snippets using fuzzy search.
+- **Text-based user interface**: Navigate through your snippets and notebooks with a simple and intuitive interface.
+- **Command line interface**: Access all features through a powerful command line interface.
+- **Favorites**: Mark snippets as favorites for quick access.
+- **Recents**: View recently used snippets for quick retrieval using keybinds.
+- **Preview snippets**: View snippets in a readable format before using them.
+- **Export/Import**: Easily export and import your snippets and notebooks for backup or sharing.
+- **Backup**: Automatically backup your snippets and notebooks to prevent data loss also supports auto backup.
+
 ## Text-based User Interface
 Launch the interactive interface:
 
@@ -80,6 +93,39 @@ or using make:
 cd snix
 make install
 ```
+
+Or if you prefer to build and run Snix is using Docker Compose:
+
+```bash
+# Build and run the container
+docker-compose up -d
+
+# Attach to the running container
+docker attach snix
+```
+
+Building and Running with Docker Directly,
+If you prefer to use Docker commands directly:
+
+```bash
+# Build the Docker image
+docker build -t snix .
+
+# Run the container
+docker run -it --name snix snix
+```
+
+- The container is configured to run in interactive mode with a TTY to support the terminal UI.
+- The application is installed to `/root/.local/bin/` inside the container.
+- If you encounter any issues with terminal rendering:
+- Make sure your terminal supports 256 colors
+- Try running with an explicit TERM setting:
+
+```bash
+docker run -it -e TERM=xterm-256color --name snix snix
+```
+
+To exit the application, use the key combination defined in the application (typically 'q' or Ctrl+C).
 
 ## Screenshot
 
