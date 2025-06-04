@@ -4,6 +4,7 @@
 //! application state changes, navigation actions, and menu interactions.
 
 use crate::app::{App, AppState, CodeSnippetsState, InputMode, RecentSearchEntry, TreeItem};
+use crate::handlers::ollama;
 use crate::models::SnippetLanguage;
 use crate::models::export::ExportFormat;
 use crate::ui::backup_restore;
@@ -18,6 +19,13 @@ use std::process::{Command, Stdio};
 /// key events from the terminal and routes them to appropriate specialized handlers
 /// based on the current application state.
 pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
+    // Handle Ollama popup if it's active
+    if let Some(ollama_state) = &app.ollama_state {
+        if ollama_state.show_popup {
+            return ollama::handle_ollama_keys(app, key);
+        }
+    }
+
     // Handle special input modes first
     if app.input_mode == InputMode::SelectNotebookColor {
         match key.code {
@@ -1007,6 +1015,35 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             false
         }
 
+        // Open snippet in Ollama chat
+        KeyCode::Char('l') => {
+            app.clear_messages();
+            if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                    // Initialize Ollama state if needed
+                    if app.ollama_state.is_none() {
+                        app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
+                    }
+
+                    if let Some(ollama_state) = &mut app.ollama_state {
+                        // Set the snippet content
+                        ollama_state.current_snippet = Some(snippet.content.clone());
+                        ollama_state.show_popup = true;
+                        ollama_state.models.clear();
+                        ollama_state.loading_models = true;
+
+                        // Fetch Ollama models
+                        if let Err(e) = ollama::fetch_ollama_models(app) {
+                            app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
+                        }
+                    }
+                }
+            } else {
+                app.set_error_message("Select a snippet first".to_string());
+            }
+            false
+        }
+
         _ => false,
     }
 }
@@ -1038,7 +1075,35 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::U
             false
         }
 
-        _ => false,
+        // Open snippet in Ollama chat
+        KeyCode::Char('l') => {
+            if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                    // Initialize Ollama state if needed
+                    if app.ollama_state.is_none() {
+                        app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
+                    }
+
+                    if let Some(ollama_state) = &mut app.ollama_state {
+                        // Set the snippet content
+                        ollama_state.current_snippet = Some(snippet.content.clone());
+                        ollama_state.show_popup = true;
+                        ollama_state.models.clear();
+                        ollama_state.loading_models = true;
+
+                        // Fetch Ollama models
+                        if let Err(e) = ollama::fetch_ollama_models(app) {
+                            app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
+                        }
+                    }
+                }
+            } else {
+                app.set_error_message("Select a snippet first".to_string());
+            }
+            false
+        }
+
+        _ => handle_notebook_list_keys(key, app),
     }
 }
 
@@ -1697,6 +1762,34 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
             app.selected_recent_search = 0;
             app.needs_redraw = true;
             app.set_success_message("Search mode activated. Type to search...".to_string());
+            false
+        }
+
+        // Open snippet in Ollama chat
+        KeyCode::Char('l') => {
+            if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
+                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
+                    // Initialize Ollama state if needed
+                    if app.ollama_state.is_none() {
+                        app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
+                    }
+
+                    if let Some(ollama_state) = &mut app.ollama_state {
+                        // Set the snippet content
+                        ollama_state.current_snippet = Some(snippet.content.clone());
+                        ollama_state.show_popup = true;
+                        ollama_state.models.clear();
+                        ollama_state.loading_models = true;
+
+                        // Fetch Ollama models
+                        if let Err(e) = ollama::fetch_ollama_models(app) {
+                            app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
+                        }
+                    }
+                }
+            } else {
+                app.set_error_message("Select a snippet first".to_string());
+            }
             false
         }
 

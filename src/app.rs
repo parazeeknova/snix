@@ -2,6 +2,7 @@ use crate::models::storage::SnippetDatabase;
 use crate::models::{CodeSnippet, Notebook, SnippetLanguage, StorageManager, TagManager};
 use crate::ui::backup_restore::BackupRestoreState;
 use crate::ui::export_import::ExportImportState;
+use crate::ui::ollama::OllamaState;
 use crate::ui::{code_snippets, components, export_import, start_page};
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
@@ -202,6 +203,7 @@ pub struct App {
     pub export_import_state: Option<ExportImportState>,
     pub backup_restore_state: Option<BackupRestoreState>,
     pub show_backup_restore_overlay: bool,
+    pub ollama_state: Option<OllamaState>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -251,7 +253,6 @@ impl App {
             state: AppState::StartPage,
             selected_menu_item: 0,
             page_history: vec![AppState::StartPage],
-
             code_snippets_state: CodeSnippetsState::NotebookList,
             snippet_database,
             storage_manager,
@@ -284,6 +285,7 @@ impl App {
             export_import_state: None,
             backup_restore_state: None,
             show_backup_restore_overlay: false,
+            ollama_state: Some(OllamaState::new()),
         };
 
         app.refresh_tree_items();
@@ -706,6 +708,9 @@ impl App {
         if self.show_about_popup {
             crate::ui::about::render_about(frame, self);
         }
+
+        // Render Ollama popup if active
+        crate::ui::ollama::render_ollama_popup(frame, self, frame.area());
     }
 
     pub fn update_snippet_description(

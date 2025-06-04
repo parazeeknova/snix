@@ -345,6 +345,10 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
             Span::raw("Copy snippet content to clipboard"),
         ]),
         Line::from(vec![
+            Span::styled("  l   ", Style::default().fg(RosePine::GOLD)),
+            Span::raw("Open Ollama chat for selected snippet"),
+        ]),
+        Line::from(vec![
             Span::styled("  /   ", Style::default().fg(RosePine::GOLD)),
             Span::raw("Search snippets"),
         ]),
@@ -410,6 +414,7 @@ fn render_help_menu_overlay(frame: &mut Frame, area: Rect, _app: &mut App) {
         Line::from("• Copy to clipboard functionality"),
         Line::from("• Content scrolling with scrollbar"),
         Line::from("• Detailed notebook statistics and graphs"),
+        Line::from("• Ollama integration for AI-assisted code understanding"),
         Line::from(""),
         Line::from(Span::styled(
             "General",

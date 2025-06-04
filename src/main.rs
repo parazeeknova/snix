@@ -1,14 +1,4 @@
 //! snix - Template & Boilerplate Manager
-//!
-//! A terminal-based user interface application for managing development boilerplates,
-//! project templates, and code snippets. Built with Rust and ratatui for a fast,
-//! efficient, and beautiful terminal experience.
-//!
-//! snix provides developers with a centralized tool to:
-//! - Manage project templates and boilerplates for various tech stacks
-//! - Browse and download community-created templates from a marketplace
-//! - Store and organize frequently used code snippets
-//! - Configure development workflow preferences
 
 use crate::app::App;
 use color_eyre::Result;
@@ -50,7 +40,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Otherwise, run in TUI mode
-
     // Set up panic hook
     panic::set_hook(Box::new(|info| {
         let _ = cleanup_terminal();
