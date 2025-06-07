@@ -23,6 +23,8 @@ pub struct OllamaState {
     pub scroll_position: usize,
     pub scroll_speed: usize,
     pub loading_animation_frame: usize,
+    pub pending_response_id: Option<u64>,
+    pub typing_indicator: String,
 }
 
 #[derive(Debug, Clone)]
@@ -51,8 +53,10 @@ impl Default for OllamaState {
             is_sending: false,
             current_snippet: None,
             scroll_position: 0,
-            scroll_speed: 5, // Default scroll speed of 5 lines at a time
+            scroll_speed: 3,
             loading_animation_frame: 0,
+            pending_response_id: None,
+            typing_indicator: String::new(),
         }
     }
 }
@@ -76,6 +80,24 @@ impl OllamaState {
             Some(&self.models[self.selected_model_index])
         }
     }
+
+    pub fn update_typing_indicator(&mut self) {
+        if self.is_sending {
+            let dots = match (self.loading_animation_frame / 10) % 4 {
+                0 => "",
+                1 => ".",
+                2 => "..",
+                _ => "...",
+            };
+            self.typing_indicator = format!("Assistant is typing{}", dots);
+        } else {
+            self.typing_indicator.clear();
+        }
+    }
+
+    pub fn auto_scroll_to_bottom(&mut self) {
+        self.scroll_position = 999999;
+    }
 }
 
 pub fn render_ollama_popup(f: &mut Frame, app: &App, area: Rect) {
@@ -84,7 +106,6 @@ pub fn render_ollama_popup(f: &mut Frame, app: &App, area: Rect) {
             return;
         }
 
-        // Make the popup larger to fit more content
         let popup_width = area.width.min(120).max(90);
         let popup_height = area.height.min(50).max(35);
         let popup_x = (area.width - popup_width) / 2;
@@ -176,7 +197,7 @@ fn render_model_selection(f: &mut Frame, app: &App, area: Rect) {
 
         f.render_widget(models_list, layout[1]);
 
-        let footer = Paragraph::new("Press Enter to select, Esc to close")
+        let footer = Paragraph::new("↑↓: Navigate • Enter: Select • Esc: Close")
             .style(Style::default().fg(Color::Gray));
         f.render_widget(footer, layout[2]);
     }
@@ -190,6 +211,7 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
                 Constraint::Length(1),
                 Constraint::Min(5),
                 Constraint::Length(3),
+                Constraint::Length(1),
             ])
             .split(area);
 
@@ -252,7 +274,7 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
                 start_offset = scroll - current_height;
                 break;
             }
-            current_height += height + 1; // Add 1 for spacing
+            current_height += height + 1;
         }
 
         // Render visible messages
@@ -318,6 +340,39 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
             y_offset += 1;
         }
 
+        // Show typing indicator if the assistant is responding
+        if ollama_state.is_sending && !ollama_state.typing_indicator.is_empty() {
+            let remaining_height = chat_area.height as usize - y_offset;
+            if remaining_height > 2 {
+                let typing_area = Rect::new(
+                    chat_area.x,
+                    chat_area.y + y_offset as u16,
+                    chat_area.width,
+                    3.min(remaining_height) as u16,
+                );
+
+                let typing_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .title(Span::styled(
+                        "Assistant:",
+                        Style::default().fg(Color::Yellow),
+                    ));
+
+                f.render_widget(typing_block.clone(), typing_area);
+
+                let typing_inner = typing_block.inner(typing_area);
+                if !typing_inner.is_empty() {
+                    let typing_text = Paragraph::new(ollama_state.typing_indicator.clone()).style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::ITALIC),
+                    );
+                    f.render_widget(typing_text, typing_inner);
+                }
+            }
+        }
+
         // Input area
         let input_block = Block::default()
             .borders(Borders::ALL)
@@ -371,6 +426,17 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
                 f.render_widget(snippet_info, info_area);
             }
         }
+
+        let shortcuts = if ollama_state.is_sending {
+            "Generating response... • ↑↓: Scroll • Esc: Close"
+        } else {
+            "↑↓: Scroll • PgUp/PgDn: Fast Scroll • Ctrl+L: Clear • Ctrl+End: Bottom • Esc: Close"
+        };
+
+        let footer = Paragraph::new(shortcuts)
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        f.render_widget(footer, layout[3]);
     }
 }
 
@@ -515,7 +581,6 @@ fn render_markdown(markdown: &str, width: usize) -> Text {
                                 current_line = Line::default();
                             }
 
-                            // Re-add indentation for lists
                             if list_indent > 0 {
                                 let indent = " ".repeat(list_indent);
                                 current_line.spans.push(Span::raw(indent));
