@@ -1026,11 +1026,23 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                     }
 
                     if let Some(ollama_state) = &mut app.ollama_state {
+                        // Reset conversation and state
+                        ollama_state.conversation.clear();
+                        ollama_state.scroll_position = 0;
+
                         // Set the snippet content
                         ollama_state.current_snippet = Some(snippet.content.clone());
                         ollama_state.show_popup = true;
                         ollama_state.models.clear();
                         ollama_state.loading_models = true;
+
+                        // Add system message with snippet info
+                        let snippet_info = format!(
+                            "Working with snippet: {} ({})",
+                            snippet.title,
+                            snippet.language.to_string()
+                        );
+                        ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
 
                         // Fetch Ollama models
                         if let Err(e) = ollama::fetch_ollama_models(app) {
@@ -1085,11 +1097,23 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::U
                     }
 
                     if let Some(ollama_state) = &mut app.ollama_state {
+                        // Reset conversation and state
+                        ollama_state.conversation.clear();
+                        ollama_state.scroll_position = 0;
+
                         // Set the snippet content
                         ollama_state.current_snippet = Some(snippet.content.clone());
                         ollama_state.show_popup = true;
                         ollama_state.models.clear();
                         ollama_state.loading_models = true;
+
+                        // Add system message with snippet info
+                        let snippet_info = format!(
+                            "Working with snippet: {} ({})",
+                            snippet.title,
+                            snippet.language.to_string()
+                        );
+                        ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
 
                         // Fetch Ollama models
                         if let Err(e) = ollama::fetch_ollama_models(app) {
@@ -1775,11 +1799,22 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
                     }
 
                     if let Some(ollama_state) = &mut app.ollama_state {
+                        // Reset conversation and state
+                        ollama_state.conversation.clear();
+                        ollama_state.scroll_position = 0;
+
                         // Set the snippet content
                         ollama_state.current_snippet = Some(snippet.content.clone());
                         ollama_state.show_popup = true;
                         ollama_state.models.clear();
                         ollama_state.loading_models = true;
+
+                        // Add system message with snippet info
+                        let snippet_info = format!(
+                            "Working with snippet: {} ({})",
+                            snippet.title, snippet.language
+                        );
+                        ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
 
                         // Fetch Ollama models
                         if let Err(e) = ollama::fetch_ollama_models(app) {

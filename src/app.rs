@@ -658,6 +658,9 @@ impl App {
 
     /// Call this periodically to auto-clear messages after a timeout
     pub fn _tick(&mut self) {
+        // Update Ollama loading animation if active
+        crate::handlers::ollama::update_loading_animation(self);
+
         // Messages will be cleared by user interaction or manual clearing
         // This is a placeholder for future auto-clear functionality
     }

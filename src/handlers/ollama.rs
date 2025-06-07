@@ -1,10 +1,10 @@
 use crate::app::App;
 use crate::ui::ollama::ChatRole;
-use anyhow::Result;
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use anyhow::{Result, anyhow};
+use ollama_rs::{Ollama, generation::completion::request::GenerationRequest, models::ModelOptions};
 use std::sync::mpsc;
 use std::thread;
+use tokio::runtime::Runtime;
 
 pub fn fetch_ollama_models(app: &mut App) -> Result<()> {
     if let Some(ollama_state) = &mut app.ollama_state {
@@ -15,36 +15,40 @@ pub fn fetch_ollama_models(app: &mut App) -> Result<()> {
         // Create a channel for communication between threads
         let (tx, rx) = mpsc::channel();
 
-        // Spawn a thread to run the command
+        // Spawn a thread to run the async Ollama API call
         thread::spawn(move || {
-            let result = Command::new("ollama")
-                .arg("list")
-                .output()
-                .map_err(|e| e.to_string());
+            // Create a new Tokio runtime for async operations
+            let rt = match Runtime::new() {
+                Ok(rt) => rt,
+                Err(_) => {
+                    // If we can't create a runtime, just ignore this thread
+                    return;
+                }
+            };
 
+            let result = rt.block_on(async {
+                let ollama = Ollama::default();
+                ollama.list_local_models().await
+            });
             let _ = tx.send(result);
         });
 
         // Wait for the result with a timeout
         match rx.recv_timeout(std::time::Duration::from_secs(5)) {
             Ok(result) => match result {
-                Ok(output) => {
-                    if output.status.success() {
-                        let output_str = String::from_utf8_lossy(&output.stdout).to_string();
-                        let models = parse_ollama_models(&output_str);
-
-                        if models.is_empty() {
-                            ollama_state.error_message = Some("No models found".to_string());
-                        } else {
-                            ollama_state.models = models;
-                        }
+                Ok(models_list) => {
+                    if models_list.is_empty() {
+                        ollama_state.error_message = Some("No models found".to_string());
                     } else {
-                        let error = String::from_utf8_lossy(&output.stderr).to_string();
-                        ollama_state.error_message = Some(error);
+                        // Extract model names from the response
+                        let model_names: Vec<String> =
+                            models_list.iter().map(|model| model.name.clone()).collect();
+
+                        ollama_state.models = model_names;
                     }
                 }
                 Err(e) => {
-                    ollama_state.error_message = Some(e);
+                    ollama_state.error_message = Some(format!("Error: {}", e));
                 }
             },
             Err(_) => {
@@ -56,22 +60,8 @@ pub fn fetch_ollama_models(app: &mut App) -> Result<()> {
         ollama_state.loading_models = false;
         Ok(())
     } else {
-        Err(anyhow::anyhow!("Ollama state not initialized"))
+        Err(anyhow!("Ollama state not initialized"))
     }
-}
-
-fn parse_ollama_models(output: &str) -> Vec<String> {
-    let mut models = Vec::new();
-
-    // Skip the header line
-    for line in output.lines().skip(1) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if !parts.is_empty() {
-            models.push(parts[0].to_string());
-        }
-    }
-
-    models
 }
 
 pub fn send_message_to_ollama(app: &mut App, message: String) -> Result<()> {
@@ -79,9 +69,6 @@ pub fn send_message_to_ollama(app: &mut App, message: String) -> Result<()> {
         if let Some(model) = ollama_state.get_selected_model().cloned() {
             // Add user message to conversation immediately
             ollama_state.add_message(ChatRole::User, message.clone());
-
-            // Add a temporary "thinking" message
-            ollama_state.add_message(ChatRole::System, "Processing your request...".to_string());
 
             // Set sending state and clear input buffer
             ollama_state.is_sending = true;
@@ -94,88 +81,52 @@ pub fn send_message_to_ollama(app: &mut App, message: String) -> Result<()> {
             let model_clone = model.clone();
             let snippet = ollama_state.current_snippet.clone().unwrap_or_default();
 
-            // Spawn a thread to run the command
+            // Prepare the prompt
+            let prompt = if !snippet.is_empty() {
+                format!(
+                    "The following is a code snippet. Please help me understand or improve it:\n\n```\n{}\n```\n\n{}",
+                    snippet, message
+                )
+            } else {
+                message
+            };
+
+            // Spawn a thread to run the async Ollama API call
             thread::spawn(move || {
-                let prompt = if !snippet.is_empty() {
-                    format!(
-                        "The following is a code snippet. Please help me understand or improve it:\n\n```\n{}\n```\n\n{}",
-                        snippet, message
-                    )
-                } else {
-                    message
+                // Create a new Tokio runtime for async operations
+                let rt = match Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(_) => {
+                        // If we can't create a runtime, just ignore this thread
+                        return;
+                    }
                 };
 
-                let cmd = Command::new("ollama")
-                    .arg("run")
-                    .arg(model_clone)
-                    .arg(prompt)
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|e| e.to_string());
+                let result = rt.block_on(async {
+                    let ollama = Ollama::default();
 
-                match cmd {
-                    Ok(mut child) => {
-                        let stdout = child.stdout.take().expect("Failed to capture stdout");
-                        let reader = BufReader::new(stdout);
-                        let mut response = String::new();
+                    // Create generation request with options using builder pattern
+                    let options = ModelOptions::default().temperature(0.7).num_predict(2048);
 
-                        for line in reader.lines() {
-                            match line {
-                                Ok(line) => {
-                                    response.push_str(&line);
-                                    response.push('\n');
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(Err(e.to_string()));
-                                    return;
-                                }
-                            }
-                        }
+                    let request = GenerationRequest::new(model_clone, prompt).options(options);
 
-                        let _ = tx.send(Ok(response));
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                    }
-                }
+                    // Generate response
+                    ollama.generate(request).await
+                });
+                let _ = tx.send(result);
             });
 
-            // Wait for the result with a timeout
+            // Wait for the result with a timeout (2 minutes should be enough for most responses)
             match rx.recv_timeout(std::time::Duration::from_secs(120)) {
-                Ok(result) => {
-                    // Remove the temporary "thinking" message
-                    if ollama_state.conversation.len() >= 2 {
-                        if let Some(last_msg) = ollama_state.conversation.last() {
-                            if last_msg.role == ChatRole::System
-                                && last_msg.content == "Processing your request..."
-                            {
-                                ollama_state.conversation.pop();
-                            }
-                        }
+                Ok(result) => match result {
+                    Ok(response) => {
+                        ollama_state.add_message(ChatRole::Assistant, response.response);
                     }
-
-                    match result {
-                        Ok(response) => {
-                            ollama_state.add_message(ChatRole::Assistant, response);
-                        }
-                        Err(e) => {
-                            ollama_state.add_message(ChatRole::System, format!("Error: {}", e));
-                        }
+                    Err(e) => {
+                        ollama_state.add_message(ChatRole::System, format!("Error: {}", e));
                     }
-                }
+                },
                 Err(_) => {
-                    // Remove the temporary "thinking" message
-                    if ollama_state.conversation.len() >= 2 {
-                        if let Some(last_msg) = ollama_state.conversation.last() {
-                            if last_msg.role == ChatRole::System
-                                && last_msg.content == "Processing your request..."
-                            {
-                                ollama_state.conversation.pop();
-                            }
-                        }
-                    }
-
                     ollama_state.add_message(
                         ChatRole::System,
                         "Error: Timeout waiting for response".to_string(),
@@ -188,6 +139,17 @@ pub fn send_message_to_ollama(app: &mut App, message: String) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn update_loading_animation(app: &mut App) {
+    // Check if ollama_state exists before trying to access it
+    if let Some(ollama_state) = &mut app.ollama_state {
+        if ollama_state.is_sending || ollama_state.loading_models {
+            // Update the animation frame safely
+            ollama_state.loading_animation_frame =
+                ollama_state.loading_animation_frame.wrapping_add(1);
+        }
+    }
 }
 
 pub fn handle_ollama_keys(app: &mut App, key: ratatui::crossterm::event::KeyEvent) -> bool {
@@ -214,10 +176,10 @@ pub fn handle_ollama_keys(app: &mut App, key: ratatui::crossterm::event::KeyEven
                         ollama_state.selected_model_index = ollama_state.models.len() - 1;
                     }
                 } else if ollama_state.get_selected_model().is_some() {
-                    // Scroll up in chat view
-                    if ollama_state.scroll_position > 0 {
-                        ollama_state.scroll_position -= 1;
-                    }
+                    // Scroll up in chat view with speed factor
+                    ollama_state.scroll_position = ollama_state
+                        .scroll_position
+                        .saturating_sub(ollama_state.scroll_speed);
                 }
                 false
             }
@@ -227,8 +189,8 @@ pub fn handle_ollama_keys(app: &mut App, key: ratatui::crossterm::event::KeyEven
                     ollama_state.selected_model_index =
                         (ollama_state.selected_model_index + 1) % ollama_state.models.len();
                 } else if ollama_state.get_selected_model().is_some() {
-                    // Scroll down in chat view
-                    ollama_state.scroll_position += 1;
+                    // Scroll down in chat view with speed factor
+                    ollama_state.scroll_position += ollama_state.scroll_speed;
                     // The max scroll is handled in the render function
                 }
                 false
@@ -237,16 +199,18 @@ pub fn handle_ollama_keys(app: &mut App, key: ratatui::crossterm::event::KeyEven
             // Page up/down for faster scrolling
             KeyCode::PageUp => {
                 if ollama_state.get_selected_model().is_some() {
-                    // Scroll up by 10 lines
-                    ollama_state.scroll_position = ollama_state.scroll_position.saturating_sub(10);
+                    // Scroll up by 10 lines * scroll speed
+                    ollama_state.scroll_position = ollama_state
+                        .scroll_position
+                        .saturating_sub(10 * ollama_state.scroll_speed);
                 }
                 false
             }
 
             KeyCode::PageDown => {
                 if ollama_state.get_selected_model().is_some() {
-                    // Scroll down by 10 lines
-                    ollama_state.scroll_position += 10;
+                    // Scroll down by 10 lines * scroll speed
+                    ollama_state.scroll_position += 10 * ollama_state.scroll_speed;
                     // The max scroll is handled in the render function
                 }
                 false
@@ -262,41 +226,43 @@ pub fn handle_ollama_keys(app: &mut App, key: ratatui::crossterm::event::KeyEven
 
             KeyCode::End => {
                 if ollama_state.get_selected_model().is_some() {
-                    // Set to a large number, will be clamped in render
-                    ollama_state.scroll_position = usize::MAX;
+                    // Set to a large number that will be safely clamped in render
+                    ollama_state.scroll_position = 999999;
                 }
                 false
             }
 
-            // Select model or send message
+            // Model selection or sending a message
             KeyCode::Enter => {
-                if ollama_state.get_selected_model().is_none() {
-                    // We're in model selection mode
+                if ollama_state.is_sending {
+                    // Don't allow new messages while processing
+                    false
+                } else if ollama_state.get_selected_model().is_none() {
+                    // Select model if on model selection screen
                     if !ollama_state.models.is_empty() {
-                        // Initialize conversation with system message
+                        // Add a welcome message
                         ollama_state.conversation.clear();
                         ollama_state.add_message(
                             ChatRole::System,
-                            "Chat started. You can now talk with the model.".to_string(),
+                            format!(
+                                "Selected model: {}. Type your message and press Enter to send.",
+                                ollama_state.models[ollama_state.selected_model_index]
+                            ),
                         );
-
-                        // If we have a snippet, add it as context
-                        if let Some(snippet) = &ollama_state.current_snippet {
-                            ollama_state.add_message(
-                                ChatRole::System,
-                                format!("Current code snippet:\n\n```\n{}\n```", snippet),
-                            );
-                        }
                     }
-                } else if !ollama_state.is_sending && !ollama_state.input_buffer.is_empty() {
-                    // We're in chat mode, send the message
+                    false
+                } else if !ollama_state.input_buffer.trim().is_empty() {
+                    // Send message if input is not empty
                     let message = ollama_state.input_buffer.clone();
+                    // This will be handled by the app's update function
                     let _ = send_message_to_ollama(app, message);
+                    false
+                } else {
+                    false
                 }
-                false
             }
 
-            // Handle text input for chat
+            // Input handling
             KeyCode::Char(c) => {
                 if ollama_state.get_selected_model().is_some() && !ollama_state.is_sending {
                     ollama_state.input_buffer.push(c);

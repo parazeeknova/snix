@@ -23,7 +23,7 @@ pub struct CodeSnippet {
     pub syntax_theme: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum SnippetLanguage {
     Rust,
     JavaScript,
@@ -55,6 +55,12 @@ pub enum SnippetLanguage {
     Config,
     Text,
     Other(String),
+}
+
+impl std::fmt::Display for SnippetLanguage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
 }
 
 impl SnippetLanguage {

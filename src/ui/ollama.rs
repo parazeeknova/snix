@@ -1,4 +1,5 @@
 use crate::app::App;
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -6,6 +7,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone)]
 pub struct OllamaState {
@@ -19,6 +21,8 @@ pub struct OllamaState {
     pub is_sending: bool,
     pub current_snippet: Option<String>,
     pub scroll_position: usize,
+    pub scroll_speed: usize,
+    pub loading_animation_frame: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +51,8 @@ impl Default for OllamaState {
             is_sending: false,
             current_snippet: None,
             scroll_position: 0,
+            scroll_speed: 5, // Default scroll speed of 5 lines at a time
+            loading_animation_frame: 0,
         }
     }
 }
@@ -58,6 +64,9 @@ impl OllamaState {
 
     pub fn add_message(&mut self, role: ChatRole, content: String) {
         self.conversation.push(ChatMessage { role, content });
+        // Auto-scroll to the bottom when a new message is added
+        // Use a large value that will be safely clamped in render
+        self.scroll_position = 999999;
     }
 
     pub fn get_selected_model(&self) -> Option<&String> {
@@ -75,8 +84,9 @@ pub fn render_ollama_popup(f: &mut Frame, app: &App, area: Rect) {
             return;
         }
 
-        let popup_width = area.width.min(100).max(60);
-        let popup_height = area.height.min(40).max(20);
+        // Make the popup larger to fit more content
+        let popup_width = area.width.min(120).max(90);
+        let popup_height = area.height.min(50).max(35);
         let popup_x = (area.width - popup_width) / 2;
         let popup_y = (area.height - popup_height) / 2;
         let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
@@ -93,9 +103,14 @@ pub fn render_ollama_popup(f: &mut Frame, app: &App, area: Rect) {
         let inner_area = popup_block.inner(popup_area);
 
         if ollama_state.loading_models {
-            let loading_text = Paragraph::new("Loading Ollama models...")
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Yellow));
+            let loading_chars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+            let animation_char =
+                loading_chars[ollama_state.loading_animation_frame % loading_chars.len()];
+
+            let loading_text =
+                Paragraph::new(format!("Loading Ollama models... {}", animation_char))
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Yellow));
 
             f.render_widget(loading_text, inner_area);
         } else if ollama_state.models.is_empty() {
@@ -182,8 +197,21 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
             Some(model) => model.clone(),
             None => "Unknown".to_string(),
         };
-        let header = Paragraph::new(format!("Chatting with: {}", model_name))
-            .style(Style::default().fg(Color::Cyan));
+
+        // Show model name and loading indicator if processing
+        let loading_chars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+        let animation_char =
+            loading_chars[ollama_state.loading_animation_frame % loading_chars.len()];
+        let header_text = if ollama_state.is_sending {
+            format!(
+                "Chatting with: {} {} Generating response...",
+                model_name, animation_char
+            )
+        } else {
+            format!("Chatting with: {}", model_name)
+        };
+
+        let header = Paragraph::new(header_text).style(Style::default().fg(Color::Cyan));
         f.render_widget(header, layout[0]);
 
         // Chat history
@@ -200,17 +228,15 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
             .conversation
             .iter()
             .map(|msg| {
-                let mut text = Text::from(vec![Line::from("")]);
-                for line in msg.content.lines() {
-                    text.extend(Text::from(line));
-                }
-                let height = text.height() + 1;
-                total_height += height;
+                let content_width = chat_area.width.saturating_sub(4) as usize; // Account for padding
+                let wrapped_height = calculate_wrapped_height(&msg.content, content_width);
+                let height = wrapped_height + 2; // Add padding for message box
+                total_height += height + 1; // Add 1 for spacing between messages
                 height
             })
             .collect();
 
-        // Adjust scroll position if needed
+        // Safely adjust scroll position if needed
         let max_scroll = total_height.saturating_sub(chat_area.height as usize);
         let scroll = ollama_state.scroll_position.min(max_scroll);
 
@@ -226,106 +252,341 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
                 start_offset = scroll - current_height;
                 break;
             }
-            current_height += height;
+            current_height += height + 1; // Add 1 for spacing
         }
 
         // Render visible messages
-        let mut y_offset = 0;
+        let mut y_offset: usize = 0;
         for idx in start_idx..ollama_state.conversation.len() {
-            let msg = &ollama_state.conversation[idx];
-            let (prefix, style) = match msg.role {
-                ChatRole::User => ("You: ", Style::default().fg(Color::Green)),
-                ChatRole::Assistant => ("Assistant: ", Style::default().fg(Color::Cyan)),
-                ChatRole::System => ("System: ", Style::default().fg(Color::Yellow)),
-            };
-
-            // Create text with proper prefix styling
-            let mut text = Text::from(vec![Line::from(vec![
-                Span::styled(prefix, style.add_modifier(Modifier::BOLD)),
-                Span::raw(""),
-            ])]);
-
-            // Add content with proper wrapping
-            for line in msg.content.lines() {
-                text.extend(Text::from(line));
-            }
-
-            // Calculate height needed for this message
-            let text_height = text.height();
-
-            // Skip the first message partially if needed
-            let effective_y = if idx == start_idx {
-                y_offset = text_height.saturating_sub(start_offset);
-                0
-            } else {
-                y_offset
-            };
-
-            // Check if we have space to render this message
-            if effective_y < chat_area.height as usize {
-                let visible_height = (chat_area.height as usize - effective_y).min(text_height);
-                let msg_area = Rect::new(
-                    chat_area.x,
-                    chat_area.y + effective_y as u16,
-                    chat_area.width,
-                    visible_height as u16,
-                );
-
-                let paragraph = Paragraph::new(text).wrap(Wrap { trim: true });
-
-                f.render_widget(paragraph, msg_area);
-                y_offset += text_height + 1;
-            } else {
-                // Not enough space, stop rendering
+            if y_offset >= chat_area.height as usize {
                 break;
             }
+
+            let msg = &ollama_state.conversation[idx];
+            let content_width = chat_area.width.saturating_sub(4) as usize;
+
+            // Skip part of the first visible message if needed
+            let first_line_offset = if idx == start_idx { start_offset } else { 0 };
+
+            // Determine message style based on role
+            let (role_text, style) = match msg.role {
+                ChatRole::User => ("You:", Style::default().fg(Color::Green)),
+                ChatRole::Assistant => ("Assistant:", Style::default().fg(Color::Blue)),
+                ChatRole::System => ("System:", Style::default().fg(Color::Red)),
+            };
+
+            // Create message block
+            let msg_block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(style)
+                .title(Span::styled(role_text, style));
+
+            // Calculate message area
+            let msg_height = message_heights[idx];
+            let visible_height = msg_height
+                .saturating_sub(first_line_offset)
+                .min(chat_area.height as usize - y_offset);
+
+            if visible_height == 0 {
+                continue;
+            }
+
+            let msg_area = Rect::new(
+                chat_area.x,
+                chat_area.y + y_offset as u16,
+                chat_area.width,
+                visible_height as u16,
+            );
+
+            // Render message block
+            f.render_widget(msg_block.clone(), msg_area);
+
+            // Render message content with markdown parsing
+            let inner_msg_area = msg_block.inner(msg_area);
+            if !inner_msg_area.is_empty() {
+                let text = render_markdown(&msg.content, content_width);
+                let paragraph = Paragraph::new(text)
+                    .wrap(Wrap { trim: true })
+                    .scroll((first_line_offset as u16, 0));
+
+                f.render_widget(paragraph, inner_msg_area);
+            }
+
+            y_offset += visible_height;
+
+            // Add spacing between messages
+            y_offset += 1;
         }
 
         // Input area
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Message ")
+            .border_style(if ollama_state.is_sending {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Blue)
+            });
+
+        f.render_widget(input_block.clone(), layout[2]);
+
+        let input_area = input_block.inner(layout[2]);
+
         let input_style = if ollama_state.is_sending {
             Style::default().fg(Color::DarkGray)
         } else {
             Style::default()
         };
 
-        let input_placeholder = if ollama_state.is_sending {
-            "Processing... Please wait for the response"
+        let input_text = if ollama_state.is_sending {
+            "Generating response..."
+        } else if ollama_state.input_buffer.is_empty() {
+            "Type your message here..."
         } else {
-            "Type your message and press Enter to send (Esc to close)"
-        };
-
-        let input_text = if ollama_state.input_buffer.is_empty() {
-            input_placeholder.to_string()
-        } else {
-            ollama_state.input_buffer.clone()
+            &ollama_state.input_buffer
         };
 
         let input = Paragraph::new(input_text)
             .style(input_style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Your Message "),
-            )
             .wrap(Wrap { trim: true });
 
-        f.render_widget(input, layout[2]);
+        f.render_widget(input, input_area);
 
-        // Show scrolling hint if needed
-        if total_height > chat_area.height as usize {
-            let scroll_info = format!(
-                "↑↓ to scroll ({}/{})",
-                ollama_state.scroll_position.min(max_scroll),
-                max_scroll
-            );
+        // Show current snippet if available
+        if let Some(snippet) = &ollama_state.current_snippet {
+            if !snippet.is_empty() {
+                let snippet_preview = format!("Current snippet: {} lines", snippet.lines().count());
+                let snippet_info = Paragraph::new(snippet_preview.clone())
+                    .style(Style::default().fg(Color::Yellow))
+                    .alignment(Alignment::Right);
 
-            let scroll_hint = Paragraph::new(scroll_info)
-                .style(Style::default().fg(Color::DarkGray))
-                .alignment(Alignment::Right);
+                // Create a small area for the snippet info at the bottom right
+                let info_area = Rect::new(
+                    layout[2].x + layout[2].width - snippet_preview.width() as u16 - 4,
+                    layout[2].y + layout[2].height - 1,
+                    snippet_preview.width() as u16 + 2,
+                    1,
+                );
 
-            let hint_area = Rect::new(layout[0].x, layout[0].y, layout[0].width, layout[0].height);
-
-            f.render_widget(scroll_hint, hint_area);
+                f.render_widget(snippet_info, info_area);
+            }
         }
     }
+}
+
+// Convert markdown to styled text for ratatui
+fn render_markdown(markdown: &str, width: usize) -> Text {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(markdown, options);
+
+    let mut text = Text::default();
+    let mut current_line = Line::default();
+    let mut current_style = Style::default();
+    let mut code_block = false;
+    let mut list_indent: usize = 0;
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Paragraph) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            Event::End(TagEnd::Paragraph) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+                // Add empty line after paragraphs
+                text.lines.push(Line::default());
+            }
+            Event::Start(Tag::Heading { level, .. }) => {
+                let level_style = match level {
+                    HeadingLevel::H1 => Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD),
+                    HeadingLevel::H2 => Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                    _ => Style::default().add_modifier(Modifier::BOLD),
+                };
+                current_style = level_style;
+
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+                // Reset style and add empty line
+                current_style = Style::default();
+                text.lines.push(Line::default());
+            }
+            Event::Start(Tag::CodeBlock(_)) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+                code_block = true;
+                text.lines.push(Line::from(vec![Span::styled(
+                    "```",
+                    Style::default().fg(Color::DarkGray),
+                )]));
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+                code_block = false;
+                text.lines.push(Line::from(vec![Span::styled(
+                    "```",
+                    Style::default().fg(Color::DarkGray),
+                )]));
+                text.lines.push(Line::default());
+            }
+            Event::Start(Tag::List(_)) => {
+                list_indent += 2;
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_indent = list_indent.saturating_sub(2);
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            Event::Start(Tag::Item) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+
+                // Add indentation and bullet
+                let indent = " ".repeat(list_indent.saturating_sub(2));
+                current_line.spans.push(Span::raw(indent));
+                current_line
+                    .spans
+                    .push(Span::styled("• ", Style::default().fg(Color::Yellow)));
+            }
+            Event::End(TagEnd::Item) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            Event::Start(Tag::Emphasis) => {
+                current_style = current_style.add_modifier(Modifier::ITALIC);
+            }
+            Event::End(TagEnd::Emphasis) => {
+                current_style = current_style.remove_modifier(Modifier::ITALIC);
+            }
+            Event::Start(Tag::Strong) => {
+                current_style = current_style.add_modifier(Modifier::BOLD);
+            }
+            Event::End(TagEnd::Strong) => {
+                current_style = current_style.remove_modifier(Modifier::BOLD);
+            }
+            Event::Code(text_str) => {
+                current_line.spans.push(Span::styled(
+                    format!("`{}`", text_str),
+                    Style::default().fg(Color::LightMagenta),
+                ));
+            }
+            Event::Text(text_str) => {
+                let style = if code_block {
+                    Style::default().fg(Color::LightYellow)
+                } else {
+                    current_style
+                };
+
+                // Handle line wrapping for long text
+                let text_content = text_str.to_string();
+                if text_content.contains('\n') {
+                    for (i, line) in text_content.split('\n').enumerate() {
+                        if i > 0 {
+                            if !current_line.spans.is_empty() {
+                                text.lines.push(current_line);
+                                current_line = Line::default();
+                            }
+
+                            // Re-add indentation for lists
+                            if list_indent > 0 {
+                                let indent = " ".repeat(list_indent);
+                                current_line.spans.push(Span::raw(indent));
+                            }
+                        }
+                        current_line
+                            .spans
+                            .push(Span::styled(line.to_string(), style));
+                    }
+                } else {
+                    current_line.spans.push(Span::styled(text_content, style));
+                }
+            }
+            Event::SoftBreak => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            Event::HardBreak => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !current_line.spans.is_empty() {
+        text.lines.push(current_line);
+    }
+
+    // Apply width-based wrapping if needed
+    if width > 0 && !text.lines.is_empty() {
+        // The text will be wrapped by the Paragraph widget's Wrap option
+        // so we don't need to do anything special here
+    }
+
+    text
+}
+
+fn calculate_wrapped_height(text: &str, width: usize) -> usize {
+    if width == 0 {
+        return text.lines().count();
+    }
+
+    let mut height = 0;
+
+    for line in text.lines() {
+        if line.is_empty() {
+            height += 1;
+            continue;
+        }
+
+        let chars = line.chars().collect::<Vec<_>>();
+        let mut line_width = 0;
+        let mut line_count = 1;
+
+        for c in chars {
+            let char_width = UnicodeWidthChar::width(c).unwrap_or(1);
+            if line_width + char_width > width {
+                line_count += 1;
+                line_width = char_width;
+            } else {
+                line_width += char_width;
+            }
+        }
+
+        height += line_count;
+    }
+
+    height.max(1) // Ensure at least one line
 }
