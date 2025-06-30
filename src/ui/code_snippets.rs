@@ -159,16 +159,9 @@ fn render_main_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let content_chunks =
         Layout::horizontal([Constraint::Percentage(35), Constraint::Fill(1)]).split(main_chunks[0]);
 
-    // Render the preview panel first (background)
     render_preview_panel(frame, content_chunks[1], app);
-
-    // Then render the tree view (foreground)
     render_tree_view_with_colors(frame, content_chunks[0], app);
-
-    // Render the bottom bar
     render_bottom_bar(frame, main_chunks[1], app);
-
-    // Render overlays last to ensure they appear on top
     render_overlays(frame, area, app);
 }
 
@@ -680,7 +673,6 @@ pub(crate) fn render_message_overlay(frame: &mut Frame, area: Rect, message: &st
     help_paragraph.render(chunks[2], frame.buffer_mut());
 }
 
-/// Get list of available languages for snippet creation
 fn get_available_languages() -> Vec<crate::models::SnippetLanguage> {
     vec![
         crate::models::SnippetLanguage::Rust,
@@ -1148,9 +1140,8 @@ fn render_notebook_preview(
         Span::styled(total_lines.to_string(), Style::default().fg(RosePine::GOLD)),
     ]));
 
-    // Show top languages if any
+    // Show top languages if any & Sort languages by count
     if !languages.is_empty() {
-        // Sort languages by count
         let mut lang_counts: Vec<_> = languages.into_iter().collect();
         lang_counts.sort_by(|a, b| b.1.cmp(&a.1));
 
@@ -1217,7 +1208,7 @@ fn render_snippet_preview(
     // Split the top info area into sections: basic metadata and description/tags
     let top_chunks = Layout::vertical([
         Constraint::Length(8), // Basic metadata
-        Constraint::Length(6), // Description and tags side by side (reduced height)
+        Constraint::Length(6), // Description and tags side
     ])
     .split(main_chunks[0]);
 
@@ -1466,8 +1457,6 @@ pub(crate) fn display_highlighted_content(
     // Count the total number of lines for scrollbar position calculation
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
-
-    // Create visible area calculation
     let visible_lines = area.height as usize;
 
     // Ensure scroll position doesn't go beyond the content bounds
@@ -1725,7 +1714,6 @@ fn render_tags_editing(frame: &mut Frame, app: &App) {
         popup_height.min(area.height),
     );
 
-    // Render a clear area for the popup
     Clear.render(popup_area, frame.buffer_mut());
 
     // Create a block for the popup

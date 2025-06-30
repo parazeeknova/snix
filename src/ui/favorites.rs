@@ -51,7 +51,6 @@ pub fn render_floating_favorites(frame: &mut Frame, app: &App) {
                 .style(Style::default().fg(RosePine::MUTED));
         no_favorites.render(inner_area, frame.buffer_mut());
 
-        // Show help at the bottom
         let help_text = "Press Esc to close";
         let help_paragraph = Paragraph::new(help_text)
             .alignment(Alignment::Center)

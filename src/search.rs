@@ -1,7 +1,6 @@
 use crate::app::{App, RecentSearchEntry, SearchResult, SearchResultType};
 use uuid::Uuid;
 
-/// Maximum number of recent searches to store
 const MAX_RECENT_SEARCHES: usize = 10;
 
 /// Performs a search across all notebooks, snippets, and content
@@ -94,8 +93,6 @@ fn perform_tag_search(app: &mut App, tag_name: &str) -> usize {
     }
 
     let result_count = app.search_results.len();
-
-    // Save to recent searches with the count of results
     save_to_recent_searches(app, format!("#{}", tag_name), result_count);
 
     result_count
@@ -204,8 +201,6 @@ fn perform_regular_search(app: &mut App, query: &str) -> usize {
     }
 
     let result_count = app.search_results.len();
-
-    // Save to recent searches with the count of results
     save_to_recent_searches(app, query.to_string(), result_count);
 
     result_count
@@ -277,19 +272,14 @@ pub fn open_selected_search_result(app: &mut App) -> bool {
 
     match result_type {
         SearchResultType::Notebook => {
-            // Refresh tree items to ensure we have the latest data
             app.refresh_tree_items();
 
             // Find the index of this notebook in the tree
             if let Some(index) = app.tree_items.iter().position(
                 |item| matches!(item, crate::app::TreeItem::Notebook(id, _) if *id == result_id),
             ) {
-                // Set the selected tree item to this notebook
                 app.selected_tree_item = index;
-
-                // If the notebook is collapsed, expand it
                 app.expand_notebook(result_id);
-
                 // Set the code snippets state to NotebookView
                 app.code_snippets_state = crate::app::CodeSnippetsState::NotebookView {
                     notebook_id: result_id,
@@ -304,7 +294,6 @@ pub fn open_selected_search_result(app: &mut App) -> bool {
             // 2. Make sure the notebook is expanded
             // 3. Set the selected tree item to this snippet
 
-            // Refresh tree items to ensure we have the latest data
             app.refresh_tree_items();
 
             // Find the index of this snippet in the tree

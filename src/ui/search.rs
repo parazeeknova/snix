@@ -107,7 +107,6 @@ pub fn render_floating_search(frame: &mut Frame, app: &mut App) {
         render_recent_searches(frame, content_area, app);
     } else if !app.search_results.is_empty() {
         // Show search results if there are any
-        // Create a results block with no background
         let results_block = Block::default()
             .title(format!(" Results ({}) ", app.search_results.len()))
             .borders(Borders::ALL)
@@ -120,7 +119,6 @@ pub fn render_floating_search(frame: &mut Frame, app: &mut App) {
 
         frame.render_widget(results_block, results_area);
 
-        // Create inner area with 1 cell of padding
         let results_inner = Rect {
             x: results_area.x + 1,
             y: results_area.y + 1,
@@ -128,7 +126,6 @@ pub fn render_floating_search(frame: &mut Frame, app: &mut App) {
             height: results_area.height.saturating_sub(2),
         };
 
-        // Create the list items for search results - completely new approach
         let items: Vec<ListItem> = app
             .search_results
             .iter()
@@ -207,7 +204,6 @@ pub fn render_floating_search(frame: &mut Frame, app: &mut App) {
                     context_span,
                 ]);
 
-                // Create list item with the line
                 ListItem::new(line).style(if is_selected {
                     Style::default().bg(crate::ui::colors::RosePine::OVERLAY)
                 } else {
@@ -216,7 +212,6 @@ pub fn render_floating_search(frame: &mut Frame, app: &mut App) {
             })
             .collect();
 
-        // Create a very simple list with minimal styling and transparent background
         let results_list = List::new(items)
             .style(Style::default().bg(crate::ui::colors::RosePine::SURFACE))
             .block(
@@ -244,7 +239,6 @@ pub fn render_floating_search(frame: &mut Frame, app: &mut App) {
 
             frame.render_widget(preview_block, preview_area);
 
-            // Create inner area with 1 cell of padding
             let preview_inner = Rect {
                 x: preview_area.x + 1,
                 y: preview_area.y + 1,
@@ -252,11 +246,9 @@ pub fn render_floating_search(frame: &mut Frame, app: &mut App) {
                 height: preview_area.height.saturating_sub(2),
             };
 
-            // Direct render preview content without additional borders
             render_preview_content(frame, preview_inner, app, result);
         }
     } else if app.search_query.is_empty() {
-        // Show help text when search is empty
         render_search_help(frame, results_area, preview_area);
     } else {
         let no_results_text = Paragraph::new("No results found. Try a different search query.")
@@ -296,7 +288,6 @@ fn render_search_help(frame: &mut Frame, results_area: Rect, preview_area: Rect)
         height: results_area.height.saturating_sub(2),
     };
 
-    // Clear background - Fixed BUG for whitebg
     frame.render_widget(
         Block::default().style(Style::default().bg(Color::Reset)),
         help_inner,
@@ -458,7 +449,6 @@ fn render_preview_content(
                         chunks[1],
                     );
 
-                    // Call the original highlighting function but in the content area
                     display_syntax_highlighted_content(
                         frame,
                         chunks[1],
@@ -584,7 +574,6 @@ fn render_recent_searches(frame: &mut Frame, content_area: Rect, app: &mut App) 
                 time_span,
             ]);
 
-            // Create list item with the line
             ListItem::new(line).style(if is_selected {
                 Style::default().bg(crate::ui::colors::RosePine::OVERLAY)
             } else {
@@ -800,7 +789,6 @@ fn render_recent_searches(frame: &mut Frame, content_area: Rect, app: &mut App) 
                 .italic(),
         )]));
 
-        // Render the details paragraph
         let details_para = Paragraph::new(detail_lines)
             .style(Style::default().bg(crate::ui::colors::RosePine::SURFACE))
             .wrap(Wrap { trim: true });
@@ -808,7 +796,6 @@ fn render_recent_searches(frame: &mut Frame, content_area: Rect, app: &mut App) 
         frame.render_widget(details_para, details_inner);
     }
 
-    // Create a block for the recent files
     let recent_files_block = Block::default()
         .title(" 󰥔 Recent Files ")
         .borders(Borders::ALL)
@@ -828,7 +815,6 @@ fn render_recent_searches(frame: &mut Frame, content_area: Rect, app: &mut App) 
         height: recent_files_area.height.saturating_sub(2),
     };
 
-    // Get most recently accessed snippets
     let mut recent_snippets: Vec<_> = app.snippet_database.snippets.values().collect();
     recent_snippets.sort_by(|a, b| b.accessed_at.cmp(&a.accessed_at));
     recent_snippets.truncate(20);
@@ -858,7 +844,6 @@ fn render_recent_searches(frame: &mut Frame, content_area: Rect, app: &mut App) 
                     .unwrap_or(&colors[0])
                     .1;
 
-                // Get time ago string
                 let now = chrono::Utc::now();
                 let duration = now.signed_duration_since(snippet.accessed_at);
                 let ago = if duration.num_days() > 0 {
@@ -936,7 +921,6 @@ fn display_syntax_highlighted_content(
     app: &App,
 ) {
     // Instead of directly calling the original function, we'll modify its behavior
-
     // The only change needed is to use the codebase's syntax highlighting
     // but with our own background reset beforehand
     frame.render_widget(
@@ -946,6 +930,5 @@ fn display_syntax_highlighted_content(
         area,
     );
 
-    // Now call the original function
     crate::ui::code_snippets::display_highlighted_content(frame, area, content, snippet, app);
 }

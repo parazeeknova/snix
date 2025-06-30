@@ -27,8 +27,6 @@ pub enum AppState {
 
 impl Default for AppState {
     /// Returns the default application state
-    /// The application always starts on the StartPage, which serves as the main
-    /// navigation hub for accessing all other features and pages.
     fn default() -> Self {
         AppState::StartPage
     }
@@ -111,7 +109,6 @@ impl std::fmt::Debug for ConfirmationState {
     }
 }
 
-// Add the following enum to track different search result types
 #[derive(Debug, Clone, PartialEq)]
 pub enum SearchResultType {
     Notebook,
@@ -119,7 +116,6 @@ pub enum SearchResultType {
     CodeContent,
 }
 
-// Add a struct to represent a search result
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub id: Uuid,
@@ -129,7 +125,6 @@ pub struct SearchResult {
     pub parent_id: Option<Uuid>,
 }
 
-/// Struct to represent a detailed recent search entry
 #[derive(Debug, Clone)]
 pub struct RecentSearchEntry {
     pub query: String,
@@ -156,13 +151,6 @@ impl RecentSearchEntry {
 }
 
 /// Main Application State Container
-/// This struct holds all the state information needed to run the application.
-/// It tracks the current page, menu selection, and navigation history to provide
-/// a smooth user experience with proper back navigation.
-/// The App struct is the central hub for all state management and is passed
-/// to rendering functions to determine what content to display and how to
-/// style interactive elements based on the current state.
-
 #[derive(Debug)]
 pub struct App {
     pub state: AppState,
@@ -193,8 +181,6 @@ pub struct App {
     pub needs_redraw: bool,
     pub content_scroll_position: usize,
     pub selected_details_tab: usize,
-    #[allow(dead_code)]
-    pub notebook_color: Option<Uuid>,
     pub collapsed_notebooks: std::collections::HashSet<Uuid>,
     pub confirmation_state: ConfirmationState,
     pub recent_searches: Vec<RecentSearchEntry>,
@@ -231,9 +217,6 @@ pub enum InputMode {
 
 impl App {
     /// Creates a new instance of the application with default initial state
-    /// Initializes the application in the StartPage state with the first menu item
-    /// selected and an empty navigation history. This provides a clean starting
-    /// point for the user interface.
     pub fn new() -> Self {
         let storage_manager = StorageManager::new().ok();
         let snippet_database = if let Some(ref manager) = storage_manager {
@@ -276,7 +259,6 @@ impl App {
             needs_redraw: true,
             content_scroll_position: 0,
             selected_details_tab: 0,
-            notebook_color: None,
             collapsed_notebooks: std::collections::HashSet::new(),
             confirmation_state: ConfirmationState::None,
             recent_searches: Vec::new(),
@@ -582,10 +564,7 @@ impl App {
             }
         }
 
-        // Clean up any tag associations for this snippet
         self.tag_manager.handle_snippet_deleted(&snippet_id);
-
-        // Remove the snippet from the database
         self.snippet_database.snippets.remove(&snippet_id);
 
         // Decrease the snippet count in the parent notebook
@@ -596,7 +575,6 @@ impl App {
             }
         }
 
-        // Save the updated database
         if let Err(e) = self.save_database() {
             return Err(format!(
                 "Failed to save database after snippet deletion: {}",
@@ -604,7 +582,6 @@ impl App {
             ));
         }
 
-        // Refresh tree items to reflect the change
         self.refresh_tree_items();
         self.selected_tree_item = self
             .selected_tree_item
@@ -700,19 +677,16 @@ impl App {
             }
         }
 
-        // Show error message overlay if there is one
         if let Some(msg) = &self.error_message {
             crate::ui::code_snippets::render_message_overlay(frame, frame.area(), msg, true);
         } else if let Some(msg) = &self.success_message {
             crate::ui::code_snippets::render_message_overlay(frame, frame.area(), msg, false);
         }
 
-        // Show About popup on any screen if it's enabled
         if self.show_about_popup {
             crate::ui::about::render_about(frame, self);
         }
 
-        // Render Ollama popup if active
         crate::ui::ollama::render_ollama_popup(frame, self, frame.area());
     }
 
@@ -759,7 +733,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub fn update_notebook_color(
         &mut self,
         notebook_id: Uuid,
@@ -781,7 +754,6 @@ impl App {
                 desc
             };
 
-            // Add color prefix to description
             notebook.description = Some(format!("[COLOR:{}] {}", color_index, desc_without_color));
             notebook.updated_at = chrono::Utc::now();
             self.save_database()?;
@@ -803,7 +775,7 @@ impl App {
                 }
             }
         }
-        0 // Default color index
+        0
     }
 
     pub fn toggle_notebook_collapse(&mut self) -> bool {
@@ -849,7 +821,6 @@ impl App {
                 // Get parent notebook
                 if let Some(parent_id) = notebook.parent_id {
                     if let Some(parent) = self.snippet_database.notebooks.get(&parent_id).cloned() {
-                        // Get grandparent ID
                         let grandparent_id = parent.parent_id;
 
                         // Update notebook parent to grandparent (move up one level)
@@ -885,8 +856,6 @@ impl App {
 
                         // Save to make persistent
                         let _ = self.save_database();
-
-                        // Update the tree view
                         self.refresh_tree_items();
                         self.needs_redraw = true;
                         self.set_success_message("Notebook moved up one level".to_string());
@@ -916,10 +885,7 @@ impl App {
                             snippet_to_update.updated_at = chrono::Utc::now();
                         }
 
-                        // Save to make persistent
                         let _ = self.save_database();
-
-                        // Update the tree view
                         self.refresh_tree_items();
                         self.needs_redraw = true;
                         self.set_success_message("Snippet moved up one level".to_string());
@@ -1123,10 +1089,8 @@ impl App {
                                 self.hovered_tree_item = Some(index);
                             }
 
-                            // Update the tree view
                             self.refresh_tree_items();
                             self.needs_redraw = true;
-
                             self.set_success_message("Snippet moved to child notebook".to_string());
                             return true;
                         }
@@ -1186,11 +1150,9 @@ impl App {
                     .cloned()
                 {
                     if let Some(grandparent_id) = parent.parent_id {
-                        // Find the grandparent to get list of siblings
                         if let Some(grandparent) =
                             self.snippet_database.notebooks.get(&grandparent_id)
                         {
-                            // Get siblings (children of grandparent)
                             let siblings = &grandparent.children;
 
                             // Find index of current parent in siblings
@@ -1208,10 +1170,7 @@ impl App {
                                     snippet_to_update.notebook_id = next_sibling_id;
                                     snippet_to_update.updated_at = chrono::Utc::now();
 
-                                    // Save to make persistent
                                     let _ = self.save_database();
-
-                                    // Update the tree view
                                     self.refresh_tree_items();
                                     self.needs_redraw = true;
 
@@ -1252,10 +1211,7 @@ impl App {
                                     snippet_to_update.notebook_id = next_root_id;
                                     snippet_to_update.updated_at = chrono::Utc::now();
 
-                                    // Save to make persistent
                                     let _ = self.save_database();
-
-                                    // Update the tree view
                                     self.refresh_tree_items();
                                     self.needs_redraw = true;
 
@@ -1290,12 +1246,10 @@ impl App {
                 if let Some(parent_id) = notebook.parent_id {
                     // Find the parent to get list of siblings
                     if let Some(parent) = self.snippet_database.notebooks.get(&parent_id) {
-                        // Get siblings (children of parent)
                         let siblings = &parent.children;
 
                         // Find index of current notebook in siblings
                         if let Some(index) = siblings.iter().position(|id| *id == notebook_id) {
-                            // Get next sibling (or wrap around to first)
                             let next_index = (index + 1) % siblings.len();
                             let next_sibling_id = siblings[next_index];
 
@@ -1324,13 +1278,9 @@ impl App {
 
                                 parent_update.updated_at = chrono::Utc::now();
 
-                                // Save to make persistent
                                 let _ = self.save_database();
-
-                                // Update the tree view
                                 self.refresh_tree_items();
                                 self.needs_redraw = true;
-
                                 self.set_success_message(format!(
                                     "Moved notebook to next position"
                                 ));
@@ -1361,10 +1311,7 @@ impl App {
                             new_roots.insert(next_index, notebook_id);
                             self.snippet_database.root_notebooks = new_roots;
 
-                            // Save to make persistent
                             let _ = self.save_database();
-
-                            // Update the tree view
                             self.refresh_tree_items();
                             self.needs_redraw = true;
 
@@ -1403,10 +1350,7 @@ impl App {
                         if let Some(grandparent) =
                             self.snippet_database.notebooks.get(&grandparent_id)
                         {
-                            // Get siblings (children of grandparent)
                             let siblings = &grandparent.children;
-
-                            // Find index of current parent in siblings
                             if let Some(index) =
                                 siblings.iter().position(|id| *id == current_parent_id)
                             {
@@ -1471,10 +1415,7 @@ impl App {
                                     snippet_to_update.notebook_id = prev_root_id;
                                     snippet_to_update.updated_at = chrono::Utc::now();
 
-                                    // Save to make persistent
                                     let _ = self.save_database();
-
-                                    // Update the tree view
                                     self.refresh_tree_items();
                                     self.needs_redraw = true;
 

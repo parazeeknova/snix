@@ -11,7 +11,6 @@ use ratatui::{
 };
 use std::path::PathBuf;
 
-/// Export/Import state data
 #[derive(Debug, Clone)]
 pub struct ExportImportState {
     pub mode: ExportImportMode,
@@ -43,7 +42,6 @@ impl Default for ExportImportState {
     }
 }
 
-/// Export/Import modes
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportImportMode {
     MainMenu,
@@ -59,7 +57,6 @@ pub enum ExportImportMode {
 
 /// Main render function for the export/import page
 pub fn render(frame: &mut Frame, app: &mut App) {
-    // Get the export/import state
     let default_state = ExportImportState::default();
     let export_import_state = app.export_import_state.as_ref().unwrap_or(&default_state);
 
@@ -86,9 +83,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ExportImportMode::MainMenu => render_main_menu(frame, chunks[0], app),
         ExportImportMode::ExportOptions => render_export_options(frame, chunks[0], app),
         ExportImportMode::ExportPath => {
-            // First render the main menu as background
             render_export_options(frame, chunks[0], app);
-            // Then render the export path popup
             render_export_path(frame, main_area, app);
         }
         ExportImportMode::ImportOptions => render_import_options(frame, chunks[0], app),
@@ -97,9 +92,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ExportImportMode::Exporting => render_exporting(frame, chunks[0], app),
         ExportImportMode::Importing => render_importing(frame, chunks[0], app),
         ExportImportMode::ImportPathPopup => {
-            // First render the main menu as background
             render_main_menu(frame, chunks[0], app);
-            // Then render the import path popup
             render_import_path_popup(frame, main_area, app);
         }
     }
@@ -129,7 +122,6 @@ fn render_main_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .split(content_area);
 
-    // Title
     let title = Paragraph::new("Export & Import Snippets and Notebooks")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::GOLD).bold());
@@ -193,7 +185,7 @@ fn render_main_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_stateful_widget(menu_list, content_chunks[1], &mut list_state);
 }
 
-/// Render the export options screen
+// Render the export options screen
 fn render_export_options(frame: &mut Frame, area: Rect, app: &mut App) {
     let default_state = ExportImportState::default();
     let export_import_state = app.export_import_state.as_ref().unwrap_or(&default_state);
@@ -212,7 +204,6 @@ fn render_export_options(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .split(content_area);
 
-    // Title with format indicator
     let format_name = match export_import_state.export_format {
         ExportFormat::JSON => "JSON",
         ExportFormat::YAML => "YAML",
@@ -307,7 +298,7 @@ fn render_export_options(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_stateful_widget(options_list, content_chunks[1], &mut list_state);
 }
 
-/// Path input for export
+// Path input for export
 fn render_export_path(frame: &mut Frame, area: Rect, app: &mut App) {
     let popup_width = 70;
     let popup_height = 20;
@@ -319,10 +310,7 @@ fn render_export_path(frame: &mut Frame, area: Rect, app: &mut App) {
         popup_height.min(area.height),
     );
 
-    // Clear the area where popup will be drawn
     Clear.render(popup_area, frame.buffer_mut());
-
-    // Create a popup block
     let popup_block = Block::bordered()
         .title(" Export Path ")
         .title_alignment(Alignment::Center)
@@ -331,8 +319,6 @@ fn render_export_path(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let inner_area = popup_block.inner(popup_area);
     popup_block.render(popup_area, frame.buffer_mut());
-
-    // Create a layout for the content
     let chunks = Layout::vertical([
         Constraint::Length(1), // Header text
         Constraint::Length(3), // Path input area
@@ -344,7 +330,6 @@ fn render_export_path(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .split(inner_area);
 
-    // Header text
     let header = Paragraph::new("Enter the export file path:")
         .alignment(Alignment::Left)
         .style(Style::default().fg(RosePine::TEXT).bold());
@@ -400,7 +385,6 @@ fn render_export_path(frame: &mut Frame, area: Rect, app: &mut App) {
         format_para.render(format_chunks[i], frame.buffer_mut());
     }
 
-    // Instructions
     let instructions = vec![
         "• Press Enter to confirm the path",
         "• Press Tab to cycle through format options",
@@ -417,7 +401,6 @@ fn render_export_path(frame: &mut Frame, area: Rect, app: &mut App) {
         .style(Style::default().fg(RosePine::MUTED));
     instructions_para.render(chunks[5], frame.buffer_mut());
 
-    // Status line (key help)
     let status_text = "Tab: Change Format • Enter: Confirm • Esc: Back";
     let status = Paragraph::new(status_text)
         .alignment(Alignment::Center)
@@ -533,11 +516,9 @@ fn render_import_path(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .split(content_area);
 
-    // Title
     let title = Paragraph::new("Import Path")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::GOLD).bold());
-
     title.render(content_chunks[0], frame.buffer_mut());
 
     // Path input field
@@ -599,11 +580,9 @@ fn render_import_clipboard(frame: &mut Frame, area: Rect, _app: &mut App) {
     ])
     .split(content_area);
 
-    // Title
     let title = Paragraph::new("Import from Clipboard")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::GOLD).bold());
-
     title.render(content_chunks[0], frame.buffer_mut());
 
     // Info message
@@ -741,7 +720,6 @@ fn render_import_path_popup(frame: &mut Frame, area: Rect, app: &mut App) {
     ])
     .split(inner_area);
 
-    // Title
     let title = Paragraph::new("Select file to import")
         .alignment(Alignment::Center)
         .style(Style::default().fg(RosePine::GOLD).bold());

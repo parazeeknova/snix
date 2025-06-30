@@ -22,7 +22,10 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
     // Handle Ollama popup if it's active
     if let Some(ollama_state) = &app.ollama_state {
         if ollama_state.show_popup {
-            return ollama::handle_ollama_keys(app, key);
+            match ollama::handle_ollama_input(app, key) {
+                Ok(_) => return false,
+                Err(_) => return false,
+            }
         }
     }
 
@@ -76,7 +79,7 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
     }
 
     match key.code {
-        // Global quit command - works from any page
+        // Global quit command - works from any page (Hopefully !!)
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             if app.state == AppState::StartPage || app.state != AppState::CodeSnippets {
                 return true;
@@ -177,7 +180,6 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 false
             }
             KeyCode::Char(c) => {
-                // Add character directly to search query
                 app.search_query.push(c);
 
                 // Perform search with updated query
@@ -190,7 +192,6 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 false
             }
             KeyCode::Backspace => {
-                // Remove last character from search query
                 if !app.search_query.is_empty() {
                     app.search_query.pop();
 
@@ -267,9 +268,7 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                                 app.current_notebook_id
                             };
 
-                            // Store the parent ID temporarily
                             app.current_notebook_id = parent_id;
-
                             match app.create_notebook(input) {
                                 Ok(_) => {
                                     app.set_success_message(
@@ -281,7 +280,6 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                                 }
                             }
 
-                            // Reset current_notebook_id after creating the nested notebook
                             app.current_notebook_id = None;
                         }
                         app.input_mode = InputMode::Normal;
@@ -494,6 +492,7 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 };
                 false
             }
+            // Get list of available languages for snippet creation
             KeyCode::Down | KeyCode::Char('j') if app.input_mode == InputMode::SelectLanguage => {
                 app.selected_language =
                     (app.selected_language + 1) % get_available_languages().len();
@@ -512,7 +511,6 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
     }
 }
 
-/// Get list of available languages for snippet creation
 fn get_available_languages() -> Vec<SnippetLanguage> {
     vec![
         SnippetLanguage::Rust,
@@ -547,7 +545,7 @@ fn get_available_languages() -> Vec<SnippetLanguage> {
     ]
 }
 
-/// Handles keyboard input specifically for the code snippets page
+// Handles keyboard input specifically for the code snippets page
 fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
     match app.code_snippets_state {
         CodeSnippetsState::NotebookList => handle_notebook_list_keys(key, app),
@@ -565,20 +563,17 @@ fn handle_code_snippets_keys(key: KeyEvent, app: &mut App) -> bool {
     }
 }
 
-/// Handles keys for the main notebook list view
+// Handles keys for the main notebook list view
 fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
-    // If search mode is active, handle search keys
     if app.input_mode == InputMode::Search {
         return handle_search_keys(key, app);
     }
 
-    // Close floating favorites window if it's open
     if app.show_favorites_popup && key.code == KeyCode::Esc {
         app.show_favorites_popup = false;
         return false;
     }
 
-    // Check if we have a pending confirmation
     if app.has_pending_action() {
         match key.code {
             KeyCode::Enter => {
@@ -1020,31 +1015,37 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             app.clear_messages();
             if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
                 if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
-                    // Initialize Ollama state if needed
                     if app.ollama_state.is_none() {
                         app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
                     }
 
                     if let Some(ollama_state) = &mut app.ollama_state {
-                        // Reset conversation and state
                         ollama_state.conversation.clear();
                         ollama_state.scroll_position = 0;
-
-                        // Set the snippet content
                         ollama_state.current_snippet = Some(snippet.content.clone());
+
+                        // Create enhanced system prompt with snippet context
+                        let enhanced_system_prompt =
+                            crate::handlers::ollama::create_snippet_system_prompt(
+                                &snippet.language.to_string(),
+                                &snippet.title,
+                                &snippet.content,
+                            );
+
+                        ollama_state.system_prompt = enhanced_system_prompt.clone();
+
                         ollama_state.show_popup = true;
                         ollama_state.models.clear();
                         ollama_state.loading_models = true;
+                        ollama_state.error_message = None;
 
-                        // Add system message with snippet info
                         let snippet_info = format!(
-                            "Working with snippet: {} ({})",
-                            snippet.title,
-                            snippet.language.to_string()
+                            "🔧 Working with {} snippet: '{}'",
+                            snippet.language.to_string(),
+                            snippet.title
                         );
                         ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
 
-                        // Fetch Ollama models
                         if let Err(e) = ollama::fetch_ollama_models(app) {
                             app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
                         }
@@ -1091,34 +1092,35 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::U
         KeyCode::Char('l') => {
             if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
                 if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
-                    // Initialize Ollama state if needed
                     if app.ollama_state.is_none() {
                         app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
                     }
 
                     if let Some(ollama_state) = &mut app.ollama_state {
-                        // Reset conversation and state
                         ollama_state.conversation.clear();
                         ollama_state.scroll_position = 0;
-
-                        // Set the snippet content
                         ollama_state.current_snippet = Some(snippet.content.clone());
+
+                        let enhanced_system_prompt =
+                            crate::handlers::ollama::create_snippet_system_prompt(
+                                &snippet.language.to_string(),
+                                &snippet.title,
+                                &snippet.content,
+                            );
+
+                        ollama_state.system_prompt = enhanced_system_prompt.clone();
                         ollama_state.show_popup = true;
                         ollama_state.models.clear();
                         ollama_state.loading_models = true;
+                        ollama_state.error_message = None;
 
-                        // Add system message with snippet info
+                        // Add system message with snippet info for conversation history
                         let snippet_info = format!(
-                            "Working with snippet: {} ({})",
-                            snippet.title,
-                            snippet.language.to_string()
+                            "🔧 Working with {} snippet: '{}'",
+                            snippet.language.to_string(),
+                            snippet.title
                         );
                         ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
-
-                        // Fetch Ollama models
-                        if let Err(e) = ollama::fetch_ollama_models(app) {
-                            app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
-                        }
                     }
                 }
             } else {
@@ -1165,7 +1167,6 @@ fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
                 }
             }
 
-            // Clear search query when closing
             app.search_query.clear();
             app.search_results.clear();
             app.selected_search_result = 0;
@@ -1388,7 +1389,6 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
 
     for editor in &editors {
         if let Ok(mut child) = Command::new(editor).arg(file_path).spawn() {
-            // Wait for editor to close
             if let Ok(_) = child.wait() {
                 editor_launched = true;
                 break;
@@ -1404,7 +1404,6 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
         return Err("Could not launch any editor".into());
     }
 
-    // Give a visual signal that we're returning to the application
     println!("\nReturning to snix...");
     stdout().flush()?;
     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -1432,10 +1431,6 @@ fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std
 }
 
 /// Handles keyboard input specifically for the start page (main menu)
-/// This function processes all keyboard interactions when the user is on the main
-/// start page. It handles menu navigation (up/down movement), item selection,
-/// and provides convenient single-letter shortcuts for quick navigation to
-/// specific sections of the application.
 fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
     // If backup/restore overlay is open, handle its keys first
     if app.show_backup_restore_overlay {
@@ -1618,7 +1613,7 @@ fn handle_about_popup_keys(key: KeyEvent, app: &mut App) -> bool {
         }
         KeyCode::Tab => {
             // Cycle through tabs
-            app.selected_about_tab = (app.selected_about_tab + 1) % 5; // 5 tabs total
+            app.selected_about_tab = (app.selected_about_tab + 1) % 5;
             false
         }
         KeyCode::BackTab => {
@@ -1649,10 +1644,6 @@ fn handle_about_popup_keys(key: KeyEvent, app: &mut App) -> bool {
 }
 
 /// Handles keyboard input for all non-start pages (WIP dialogs and future pages)
-/// This function processes keyboard interactions when the user is on any page other
-/// than the start page. Currently, all non-start pages show work-in-progress dialogs,
-/// so this handler primarily focuses on navigation commands to return to previous
-/// pages or the home page.
 fn handle_other_page_keys(key: KeyEvent, app: &mut App) -> bool {
     // Dismiss any messages with Enter key
     if key.code == KeyCode::Enter && (app.error_message.is_some() || app.success_message.is_some())
@@ -1799,24 +1790,32 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
                     }
 
                     if let Some(ollama_state) = &mut app.ollama_state {
-                        // Reset conversation and state
                         ollama_state.conversation.clear();
                         ollama_state.scroll_position = 0;
-
-                        // Set the snippet content
                         ollama_state.current_snippet = Some(snippet.content.clone());
+
+                        // Create enhanced system prompt with snippet context
+                        let enhanced_system_prompt =
+                            crate::handlers::ollama::create_snippet_system_prompt(
+                                &snippet.language.to_string(),
+                                &snippet.title,
+                                &snippet.content,
+                            );
+
+                        ollama_state.system_prompt = enhanced_system_prompt.clone();
+
                         ollama_state.show_popup = true;
                         ollama_state.models.clear();
                         ollama_state.loading_models = true;
+                        ollama_state.error_message = None;
 
-                        // Add system message with snippet info
                         let snippet_info = format!(
-                            "Working with snippet: {} ({})",
-                            snippet.title, snippet.language
+                            "🔧 Working with {} snippet: '{}'",
+                            snippet.language.to_string(),
+                            snippet.title
                         );
                         ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
 
-                        // Fetch Ollama models
                         if let Err(e) = ollama::fetch_ollama_models(app) {
                             app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
                         }
@@ -1878,7 +1877,6 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
                     state.selected_option = (state.selected_option + 1).min(2);
                     false
                 }
-                // Shortcut keys for menu options
                 KeyCode::Char('e') | KeyCode::Char('E') => {
                     // Export to JSON
                     state.mode = ExportImportMode::ExportOptions;
@@ -2167,11 +2165,8 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
                                     Ok((notebooks, snippets)) => {
                                         // Update the app's tag manager with the merged one
                                         app.tag_manager = tag_manager_clone;
-
-                                        // Refresh the tree view
                                         app.refresh_tree_items();
 
-                                        // Save database
                                         let save_result = app.save_database();
 
                                         // Update the status message and mode
@@ -2241,7 +2236,6 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
         ExportImportMode::ImportClipboard => {
             match key.code {
                 KeyCode::Enter => {
-                    // Set the mode to importing
                     {
                         let state = app.export_import_state.as_mut().unwrap();
                         state.mode = ExportImportMode::Importing;
@@ -2265,11 +2259,7 @@ fn handle_export_import_keys(key: KeyEvent, app: &mut App) -> bool {
                                 Ok((notebooks, snippets)) => {
                                     // Update the app's tag manager with the merged one
                                     app.tag_manager = tag_manager_clone;
-
-                                    // Refresh the tree view
                                     app.refresh_tree_items();
-
-                                    // Save database
                                     let save_result = app.save_database();
 
                                     // Update the status message and mode

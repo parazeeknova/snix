@@ -57,7 +57,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         render_recent_snippets(frame, main_chunks[2], app);
     }
 
-    // Always render bottom bar at the bottom position
     render_bottom_bar(frame, main_chunks[3], app);
 }
 

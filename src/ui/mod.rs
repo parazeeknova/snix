@@ -1,5 +1,3 @@
-// UI module - all rendering and display code for RustUI
-
 pub mod about;
 pub mod backup_restore;
 pub mod code_snippets;

@@ -1,11 +1,3 @@
-//! UI Components and Layout Module
-//! This module contains all the reusable UI components and layout logic for the RustUI
-//! application. It provides functions for rendering complex interface elements like
-//! navigation bars, dialogs, and breadcrumb systems with consistent styling and behavior.
-//! - **Bottom Navigation Bar**: Breadcrumb navigation and keyboard shortcuts
-//! - **Work-in-Progress Dialog**: Centered modal for pages under development
-//! - **Breadcrumb System**: Hierarchical navigation showing current location
-
 use crate::app::{App, TreeItem};
 use crate::ui::colors::RosePine;
 use ratatui::{
@@ -17,11 +9,6 @@ use ratatui::{
 };
 
 /// Renders the bottom navigation bar with breadcrumbs and keyboard shortcut
-/// This function creates a comprehensive navigation bar at the bottom of the screen
-/// that serves two main purposes:
-/// 1. Shows breadcrumb navigation indicating the user's current location in the app
-/// 2. Displays available keyboard shortcuts relevant to the current context
-
 pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &mut App) {
     let navbar_chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).split(area);
 
@@ -36,7 +23,6 @@ pub fn render_bottom_bar(frame: &mut Frame, area: Rect, app: &mut App) {
                 .style(Style::default().fg(RosePine::HIGHLIGHT_HIGH)),
         );
 
-    // Get context-aware shortcuts
     let shortcuts = get_context_shortcuts(app);
 
     let right_content = Paragraph::new(shortcuts)
@@ -105,7 +91,6 @@ fn get_context_shortcuts(app: &mut App) -> String {
                                 "[Space ]"
                             };
 
-                        // Add move hints based on selected item
                         let move_hint =
                             if let Some(TreeItem::Notebook(_, _)) = app.get_selected_item() {
                                 "[Shift+↑] Pr │ [Shift+↓] Cd │ [Shift+←→] Sb"
@@ -178,10 +163,6 @@ fn get_context_shortcuts(app: &mut App) -> String {
 }
 
 /// Constructs the breadcrumb navigation trail with appropriate styling and symbols
-/// This function builds a visually rich breadcrumb navigation system that shows the user's
-/// current location within the application hierarchy. It uses a combination of symbols,
-/// colors, and background highlights to create an intuitive navigation experience.
-
 fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
     let mut spans = Vec::new();
 
@@ -225,7 +206,6 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                 if let Some(selected_item) = app.get_selected_item() {
                     match selected_item {
                         TreeItem::Notebook(notebook_id, _) => {
-                            // Build the full path for the notebook
                             let mut path = Vec::new();
                             let mut current_id = Some(*notebook_id);
 
@@ -279,8 +259,6 @@ fn get_breadcrumbs_with_symbols(app: &mut App) -> Line<'static> {
                         TreeItem::Snippet(snippet_id, _) => {
                             if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
                                 let notebook_id = snippet.notebook_id;
-
-                                // Build the full path for the notebook containing the snippet
                                 let mut path = Vec::new();
                                 let mut current_id = Some(notebook_id);
 

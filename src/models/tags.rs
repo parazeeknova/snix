@@ -6,22 +6,11 @@ use uuid::Uuid;
 /// Represents a tag that can be applied to snippets
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Tag {
-    /// Unique identifier for the tag
     pub id: Uuid,
-
-    /// Name of the tag (without the # prefix)
     pub name: String,
-
-    /// Optional color for the tag (RGB hex code without #)
     pub color: Option<String>,
-
-    /// When the tag was created
     pub created_at: DateTime<Utc>,
-
-    /// When the tag was last used
     pub last_used_at: DateTime<Utc>,
-
-    /// Number of times this tag has been used
     pub usage_count: usize,
 }
 
@@ -45,12 +34,10 @@ impl Tag {
         }
     }
 
-    /// Returns the tag with a # prefix for display
     pub fn display_name(&self) -> String {
         format!("#{}", self.name)
     }
 
-    /// Updates the usage count and last used time
     pub fn mark_used(&mut self) {
         self.usage_count += 1;
         self.last_used_at = Utc::now();
@@ -60,12 +47,9 @@ impl Tag {
 /// Manages all tags and their associations with snippets
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagManager {
-    /// All known tags
     pub tags: HashMap<Uuid, Tag>,
-
     /// Maps snippet IDs to the set of tag IDs they have
     pub snippet_tags: HashMap<Uuid, HashSet<Uuid>>,
-
     /// Maps tag IDs to the set of snippet IDs that have that tag
     pub tag_snippets: HashMap<Uuid, HashSet<Uuid>>,
 }
@@ -81,7 +65,6 @@ impl Default for TagManager {
 }
 
 impl TagManager {
-    /// Creates a new tag manager
     pub fn new() -> Self {
         Self::default()
     }
@@ -102,7 +85,6 @@ impl TagManager {
             }
         }
 
-        // Create a new tag
         let tag = Tag::new(clean_name);
         let tag_id = tag.id;
         self.tags.insert(tag_id, tag);

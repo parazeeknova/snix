@@ -336,13 +336,11 @@ impl CodeSnippet {
             .join(" ")
     }
 
-    /// Toggle the favorite status of the snippet
     pub fn toggle_favorite(&mut self) {
         self.is_favorite = !self.is_favorite;
         self.updated_at = Utc::now();
     }
 
-    /// Check if the snippet is favorited
     pub fn is_favorited(&self) -> bool {
         self.is_favorite
     }

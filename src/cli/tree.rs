@@ -102,10 +102,7 @@ fn print_notebook_contents(
 
         let full_path = format!("{}/{}", path, snippet.title);
 
-        // Print left margin with indentation guides
         print!("{}  ", "┃".bright_magenta());
-
-        // Print the tree indentation guides
         for guide in &guides {
             if *guide {
                 print!("┃  ");
@@ -114,7 +111,6 @@ fn print_notebook_contents(
             }
         }
 
-        // Print the item connector
         if is_last_item {
             print!("└── ");
         } else {
@@ -137,10 +133,8 @@ fn print_notebook_contents(
         let is_last = i == children.len() - 1;
         let child_path = format!("{}/{}", path, child.name);
 
-        // Print left margin with indentation guides
         print!("{}  ", "┃".bright_magenta());
 
-        // Print the tree indentation guides
         for guide in &guides {
             if *guide {
                 print!("┃  ");

@@ -78,10 +78,8 @@ pub fn render_about(frame: &mut Frame, app: &App) {
 
 fn render_overview_tab(frame: &mut Frame, area: Rect, app: &App) {
     let version = env!("CARGO_PKG_VERSION");
-
     let mut text = Vec::new();
 
-    // Logo and version
     text.push(Line::from(vec![Span::styled(
         "  ███████╗███╗   ██╗██╗██╗  ██╗  ",
         Style::default().fg(RosePine::LOVE),

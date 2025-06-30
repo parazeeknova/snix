@@ -33,7 +33,6 @@ pub fn execute_cli(args: &[String]) -> Result<(), Box<dyn Error>> {
                 // Valid UUID format, use directly
                 Some(id)
             } else {
-                // Try to find by name
                 match tree::find_notebook_by_name(&database, &args[1]) {
                     Some(id) => Some(id),
                     None => {
@@ -43,14 +42,12 @@ pub fn execute_cli(args: &[String]) -> Result<(), Box<dyn Error>> {
                             args[1]
                         );
 
-                        // Show available notebooks
                         tree::list_all_notebooks(&database)?;
                         return Ok(());
                     }
                 }
             };
 
-            // Display tree view of notebooks and snippets
             tree::display_tree(&database, notebook_id)?;
         }
         "notebooks" => {

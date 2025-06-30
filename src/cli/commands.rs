@@ -24,7 +24,7 @@ pub fn show_snippet(name_or_id: &str) -> Result<(), Box<dyn Error>> {
             if let Some(snippet) = exact_match {
                 Some(snippet.id)
             } else {
-                // Try partial match
+                // Then try partial match
                 let partial_match = database
                     .snippets
                     .values()
