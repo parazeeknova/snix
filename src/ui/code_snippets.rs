@@ -1212,6 +1212,13 @@ fn render_snippet_preview(
     ])
     .split(main_chunks[0]);
 
+    // Split the top area horizontally: metadata on left, chats on right
+    let metadata_chunks = Layout::horizontal([
+        Constraint::Percentage(30), // Basic metadata (left)
+        Constraint::Percentage(70), // Associated chats (right)
+    ])
+    .split(top_chunks[0]);
+
     // Basic metadata
     let info_lines = vec![
         Line::from(vec![
@@ -1258,28 +1265,131 @@ fn render_snippet_preview(
     ];
 
     let info_paragraph = Paragraph::new(info_lines).wrap(Wrap { trim: true });
-    info_paragraph.render(top_chunks[0], frame.buffer_mut());
+    info_paragraph.render(metadata_chunks[0], frame.buffer_mut());
 
-    // Split the description/tags area into two columns
-    let detail_chunks = Layout::horizontal([
+    // Associated Chats section (beside metadata, takes full height)
+    let chats_block = Block::default()
+        .title(" 💬 Associated Chats ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().fg(RosePine::IRIS).bg(RosePine::SURFACE));
+
+    frame.render_widget(chats_block, metadata_chunks[1]);
+
+    let chats_inner = Rect {
+        x: metadata_chunks[1].x + 1,
+        y: metadata_chunks[1].y + 1,
+        width: metadata_chunks[1].width.saturating_sub(2),
+        height: metadata_chunks[1].height.saturating_sub(2),
+    };
+
+    let bg_block = Block::default()
+        .style(Style::default().bg(RosePine::HIGHLIGHT_LOW))
+        .borders(Borders::NONE);
+    frame.render_widget(bg_block, chats_inner);
+
+    // Get associated chats for this snippet with detailed info
+    let associated_chat_details = get_detailed_chats_for_snippet(snippet, app);
+    let chats_text = if associated_chat_details.is_empty() {
+        // Check if Ollama is detected
+        let ollama_detected = app.ollama_state.is_some();
+
+        if ollama_detected {
+            "   🤖 This code looks lonely!\n\n   Press 'L' to chat with AI about it\n   and make some digital friends 🎉"
+                .to_string()
+        } else {
+            "   😴 Ollama is taking a nap...\n\n   Wake it up at ollama.ai\n   Then press 'L' for AI magic! ✨"
+                .to_string()
+        }
+    } else {
+        let mut text = String::new();
+
+        text.push_str(&format!(
+            "💬 {} Chat{} | 🎯 Press 1-{} to open\n",
+            associated_chat_details.len(),
+            if associated_chat_details.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            associated_chat_details.len().min(9)
+        ));
+
+        for (i, chat) in associated_chat_details.iter().enumerate() {
+            let title = if chat.title.len() > 45 {
+                format!("{}...", &chat.title[..42])
+            } else {
+                chat.title.clone()
+            };
+
+            let prompt = if chat.first_prompt.len() > 50 {
+                format!("{}...", &chat.first_prompt[..47])
+            } else {
+                chat.first_prompt.clone()
+            };
+
+            text.push_str(&format!(
+                "{}. {} • {} msgs • {}\n",
+                i + 1,
+                title,
+                chat.message_count,
+                chat.relative_time
+            ));
+            text.push_str(&format!("   \"{}\" • 🤖 {}\n", prompt, chat.model_name));
+        }
+
+        let total_messages: usize = associated_chat_details
+            .iter()
+            .map(|c| c.message_count)
+            .sum();
+        let unique_models: std::collections::HashSet<_> = associated_chat_details
+            .iter()
+            .map(|c| &c.model_name)
+            .collect();
+
+        text.push_str(&format!(
+            "📊 {} total • {} model{}: {}",
+            total_messages,
+            unique_models.len(),
+            if unique_models.len() == 1 { "" } else { "s" },
+            unique_models
+                .iter()
+                .take(2)
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+
+        text
+    };
+
+    let chats_paragraph = Paragraph::new(chats_text)
+        .style(Style::default().fg(RosePine::TEXT))
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(chats_paragraph, chats_inner);
+
+    // Split the description area horizontally: description (left) and tags (right)
+    let desc_chunks = Layout::horizontal([
         Constraint::Percentage(60), // Description (left)
         Constraint::Percentage(40), // Tags (right)
     ])
     .split(top_chunks[1]);
 
+    // Description section
     let desc_block = Block::default()
-        .title("  Description ")
+        .title("  Description ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
-    frame.render_widget(desc_block, detail_chunks[0]);
+    frame.render_widget(desc_block, desc_chunks[0]);
 
     let desc_inner = Rect {
-        x: detail_chunks[0].x + 1,
-        y: detail_chunks[0].y + 1,
-        width: detail_chunks[0].width.saturating_sub(2),
-        height: detail_chunks[0].height.saturating_sub(2),
+        x: desc_chunks[0].x + 1,
+        y: desc_chunks[0].y + 1,
+        width: desc_chunks[0].width.saturating_sub(2),
+        height: desc_chunks[0].height.saturating_sub(2),
     };
 
     let bg_block = Block::default()
@@ -1289,7 +1399,7 @@ fn render_snippet_preview(
 
     let desc_text = if let Some(desc) = &snippet.description {
         if desc.trim().is_empty() {
-            "No description. Press 'd' to add a  description.".to_string()
+            "No description. Press 'd' to add a  description.".to_string()
         } else {
             desc.clone()
         }
@@ -1303,19 +1413,20 @@ fn render_snippet_preview(
 
     frame.render_widget(desc_paragraph, desc_inner);
 
+    // Tags section (beside description)
     let tags_block = Block::default()
         .title(" 󰓹 Tags ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::SUBTLE));
 
-    frame.render_widget(tags_block, detail_chunks[1]);
+    frame.render_widget(tags_block, desc_chunks[1]);
 
     let tags_inner = Rect {
-        x: detail_chunks[1].x + 1,
-        y: detail_chunks[1].y + 1,
-        width: detail_chunks[1].width.saturating_sub(2),
-        height: detail_chunks[1].height.saturating_sub(2),
+        x: desc_chunks[1].x + 1,
+        y: desc_chunks[1].y + 1,
+        width: desc_chunks[1].width.saturating_sub(2),
+        height: desc_chunks[1].height.saturating_sub(2),
     };
 
     let bg_block = Block::default()
@@ -1399,6 +1510,70 @@ fn render_snippet_preview(
             .alignment(Alignment::Center)
             .style(Style::default().fg(RosePine::MUTED));
         empty_text.render(main_chunks[1], frame.buffer_mut());
+    }
+}
+
+struct ChatDetails {
+    title: String,
+    message_count: usize,
+    relative_time: String,
+    model_name: String,
+    first_prompt: String,
+}
+
+fn get_detailed_chats_for_snippet(
+    snippet: &crate::models::CodeSnippet,
+    app: &App,
+) -> Vec<ChatDetails> {
+    // Get the ollama state from the app
+    if let Some(ollama_state) = &app.ollama_state {
+        // Generate snippet hash the same way it's done in ollama.rs
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        snippet.content.hash(&mut hasher);
+        let snippet_hash = format!("{:x}", hasher.finish());
+
+        // Find sessions with matching snippet hash and sort by most recent
+        let mut matching_sessions: Vec<_> = ollama_state
+            .saved_sessions
+            .iter()
+            .filter(|session| session.snippet_hash.as_ref() == Some(&snippet_hash))
+            .collect();
+
+        // Sort by updated_at (most recent first)
+        matching_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+        matching_sessions
+            .into_iter()
+            .map(|session| {
+                // Get the first user message as the description
+                let first_prompt = session
+                    .conversation
+                    .iter()
+                    .find(|msg| matches!(msg.role, crate::ui::ollama::ChatRole::User))
+                    .map(|msg| {
+                        let content = msg.content.trim();
+                        if content.len() > 60 {
+                            format!("{}...", &content[..57])
+                        } else {
+                            content.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "No user messages yet".to_string());
+
+                ChatDetails {
+                    title: session.title.clone(),
+                    message_count: session.get_message_count(),
+                    relative_time: session.get_relative_time(),
+                    model_name: session.model_name.clone(),
+                    first_prompt,
+                }
+            })
+            .collect()
+    } else {
+        vec![]
     }
 }
 

@@ -9,8 +9,32 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageMetrics {
+    #[serde(default)]
+    pub tokens_per_second: Option<f64>,
+    #[serde(default)]
+    pub total_tokens: Option<u32>,
+    #[serde(default)]
+    pub response_time_ms: Option<u64>,
+    #[serde(default = "Utc::now")]
+    pub timestamp: DateTime<Utc>,
+}
+
+impl Default for MessageMetrics {
+    fn default() -> Self {
+        Self {
+            tokens_per_second: None,
+            total_tokens: None,
+            response_time_ms: None,
+            timestamp: Utc::now(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatSession {
@@ -23,8 +47,37 @@ pub struct ChatSession {
     pub snippet_hash: Option<String>,
     pub snippet_title: Option<String>,
     pub conversation: Vec<ChatMessage>,
+    #[serde(default)]
     pub is_favorited: bool,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub total_context_tokens: u32,
+    #[serde(default)]
+    pub session_stats: SessionStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionStats {
+    #[serde(default)]
+    pub total_messages: u32,
+    #[serde(default)]
+    pub average_response_time_ms: f64,
+    #[serde(default)]
+    pub average_tokens_per_second: f64,
+    #[serde(default)]
+    pub total_tokens_generated: u32,
+}
+
+impl Default for SessionStats {
+    fn default() -> Self {
+        Self {
+            total_messages: 0,
+            average_response_time_ms: 0.0,
+            average_tokens_per_second: 0.0,
+            total_tokens_generated: 0,
+        }
+    }
 }
 
 impl ChatSession {
@@ -32,7 +85,7 @@ impl ChatSession {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
-            title: format!("Chat with {}", model_name),
+            title: format!("Chat - {}", now.format("%b %d, %H:%M")),
             created_at: now,
             updated_at: now,
             model_name,
@@ -42,6 +95,8 @@ impl ChatSession {
             conversation: Vec::new(),
             is_favorited: false,
             tags: Vec::new(),
+            total_context_tokens: 0,
+            session_stats: SessionStats::default(),
         }
     }
 
@@ -53,13 +108,58 @@ impl ChatSession {
         snippet_content.hash(&mut hasher);
         self.snippet_hash = Some(format!("{:x}", hasher.finish()));
         self.snippet_title = Some(snippet_title.clone());
-        self.title = format!("Chat about {}", snippet_title);
+        self.title = format!(
+            "{} - {}",
+            snippet_title,
+            self.created_at.format("%b %d, %H:%M")
+        );
         self
     }
 
     pub fn add_message(&mut self, role: ChatRole, content: String) {
-        self.conversation.push(ChatMessage { role, content });
+        self.add_message_with_metrics(role, content, MessageMetrics::default(), 0);
+    }
+
+    pub fn add_message_with_metrics(
+        &mut self,
+        role: ChatRole,
+        content: String,
+        metrics: MessageMetrics,
+        context_length: u32,
+    ) {
+        let message = ChatMessage {
+            role: role.clone(),
+            content,
+            metrics: metrics.clone(),
+            context_length,
+        };
+
+        self.conversation.push(message);
         self.updated_at = Utc::now();
+        self.total_context_tokens = context_length;
+
+        // Update session stats
+        if role == ChatRole::Assistant {
+            self.session_stats.total_messages += 1;
+
+            if let Some(tokens_per_second) = metrics.tokens_per_second {
+                let old_avg = self.session_stats.average_tokens_per_second;
+                let count = self.session_stats.total_messages as f64;
+                self.session_stats.average_tokens_per_second =
+                    (old_avg * (count - 1.0) + tokens_per_second) / count;
+            }
+
+            if let Some(response_time) = metrics.response_time_ms {
+                let old_avg = self.session_stats.average_response_time_ms;
+                let count = self.session_stats.total_messages as f64;
+                self.session_stats.average_response_time_ms =
+                    (old_avg * (count - 1.0) + response_time as f64) / count;
+            }
+
+            if let Some(tokens) = metrics.total_tokens {
+                self.session_stats.total_tokens_generated += tokens;
+            }
+        }
     }
 
     pub fn get_preview(&self) -> String {
@@ -165,12 +265,25 @@ pub struct OllamaState {
 
     // Toast notification system
     pub toast_notifications: Vec<ToastNotification>,
+
+    // Performance tracking
+    pub current_message_start_time: Option<Instant>,
+    pub current_message_token_count: u32,
+    pub current_response_buffer: String,
+
+    // Save prompt state
+    pub show_save_prompt: bool,
+    pub unsaved_changes: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: String,
+    #[serde(default)]
+    pub metrics: MessageMetrics,
+    #[serde(default)]
+    pub context_length: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -193,7 +306,6 @@ pub enum HistoryFilter {
     Recent,
     Favorites,
     CurrentSnippet,
-    Search,
 }
 
 #[derive(Debug, Clone)]
@@ -248,20 +360,45 @@ impl Default for OllamaState {
 
             // Toast notification system
             toast_notifications: Vec::new(),
+
+            // Performance tracking
+            current_message_start_time: None,
+            current_message_token_count: 0,
+            current_response_buffer: String::new(),
+
+            // Save prompt state
+            show_save_prompt: false,
+            unsaved_changes: false,
         }
     }
 }
 
 impl OllamaState {
     pub fn new() -> Self {
-        Self::default()
+        let mut state = Self::default();
+
+        // Initialize chat storage
+        if let Ok(storage) = ChatStorage::new() {
+            state.chat_storage = Some(storage);
+            // Load existing sessions
+            if let Ok(sessions) = state.chat_storage.as_ref().unwrap().load_all_sessions() {
+                state.saved_sessions = sessions;
+            }
+        }
+
+        state
     }
 
     pub fn add_message(&mut self, role: ChatRole, content: String) {
-        self.conversation.push(ChatMessage { role, content });
+        self.conversation.push(ChatMessage {
+            role,
+            content,
+            metrics: MessageMetrics::default(),
+            context_length: 0,
+        });
         // Auto-scroll to the bottom when a new message is added
-        // Use a large value that will be safely clamped in render
-        self.scroll_position = 999999;
+        // Use usize::MAX which will be safely clamped in render
+        self.scroll_position = usize::MAX;
     }
 
     pub fn get_selected_model(&self) -> Option<&String> {
@@ -304,6 +441,71 @@ impl OllamaState {
         self.toast_notifications.retain(|toast| !toast.is_expired());
     }
 
+    pub fn start_message_timing(&mut self) {
+        self.current_message_start_time = Some(Instant::now());
+        self.current_message_token_count = 0;
+        self.current_response_buffer.clear();
+    }
+
+    pub fn add_response_chunk(&mut self, chunk: &str) {
+        self.current_response_buffer.push_str(chunk);
+        // Rough token estimation (words / 0.75)
+        let words = chunk.split_whitespace().count();
+        self.current_message_token_count += (words as f64 / 0.75) as u32;
+    }
+
+    pub fn finish_message_timing(&mut self) -> MessageMetrics {
+        let mut metrics = MessageMetrics::default();
+
+        if let Some(start_time) = self.current_message_start_time.take() {
+            let duration = start_time.elapsed();
+            metrics.response_time_ms = Some(duration.as_millis() as u64);
+            metrics.total_tokens = Some(self.current_message_token_count);
+
+            if duration.as_secs_f64() > 0.0 && self.current_message_token_count > 0 {
+                metrics.tokens_per_second =
+                    Some(self.current_message_token_count as f64 / duration.as_secs_f64());
+            }
+        }
+
+        metrics.timestamp = Utc::now();
+        metrics
+    }
+
+    pub fn mark_unsaved_changes(&mut self) {
+        self.unsaved_changes = true;
+    }
+
+    pub fn has_unsaved_session(&self) -> bool {
+        self.current_session.is_some() && self.unsaved_changes
+    }
+
+    pub fn create_new_session(&mut self) -> anyhow::Result<()> {
+        let model_name = self
+            .get_selected_model()
+            .map(|m| m.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Create session with current system prompt
+        let mut new_session = ChatSession::new(model_name, self.system_prompt.clone());
+
+        // Associate with current snippet if available
+        if let Some(snippet) = &self.current_snippet {
+            new_session = new_session.with_snippet(snippet, "Current Snippet".to_string());
+        }
+
+        self.conversation.clear();
+        self.current_session = Some(new_session);
+        self.scroll_position = 0;
+        self.unsaved_changes = false;
+
+        // Switch to chat panel
+        self.active_panel = ActivePanel::CurrentChat;
+        self.error_message = None;
+
+        Ok(())
+    }
+
     pub fn get_filtered_sessions(&self) -> Vec<&ChatSession> {
         match self.history_filter {
             HistoryFilter::All => self.saved_sessions.iter().collect(),
@@ -332,24 +534,6 @@ impl OllamaState {
                         .collect()
                 } else {
                     Vec::new()
-                }
-            }
-            HistoryFilter::Search => {
-                if self.search_query.is_empty() {
-                    self.saved_sessions.iter().collect()
-                } else {
-                    let query_lower = self.search_query.to_lowercase();
-                    self.saved_sessions
-                        .iter()
-                        .filter(|session| {
-                            session.title.to_lowercase().contains(&query_lower)
-                                || session.model_name.to_lowercase().contains(&query_lower)
-                                || session
-                                    .conversation
-                                    .iter()
-                                    .any(|msg| msg.content.to_lowercase().contains(&query_lower))
-                        })
-                        .collect()
                 }
             }
         }
@@ -390,7 +574,9 @@ pub fn render_ollama_popup(f: &mut Frame, app: &App, area: Rect) {
 
         let inner_area = main_block.inner(popup_area);
 
-        if ollama_state.loading_models {
+        if ollama_state.show_save_prompt {
+            render_save_prompt(f, inner_area);
+        } else if ollama_state.loading_models {
             render_loading_screen(f, ollama_state, inner_area);
         } else if ollama_state.models.is_empty() {
             render_error_screen(f, ollama_state, inner_area);
@@ -448,6 +634,33 @@ fn render_toast_notifications(f: &mut Frame, ollama_state: &OllamaState, area: R
         f.render_widget(Clear, notification_area);
         f.render_widget(notification_text, notification_area);
     }
+}
+
+fn render_save_prompt(f: &mut Frame, area: Rect) {
+    let save_prompt_text = "💾 Save Session?\n\n\
+        You have unsaved changes in your current chat session.\n\
+        Would you like to save it before exiting?\n\n\
+        Press 'Y' to save and exit\n\
+        Press 'N' to exit without saving\n\
+        Press 'ESC' to cancel";
+
+    let save_prompt = Paragraph::new(save_prompt_text)
+        .alignment(Alignment::Center)
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .block(
+            Block::default()
+                .title("🚨 Unsaved Changes")
+                .borders(Borders::ALL)
+                .border_type(ratatui::widgets::BorderType::Double)
+                .border_style(Style::default().fg(Color::Yellow)),
+        )
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(save_prompt, area);
 }
 
 fn render_loading_screen(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
@@ -580,19 +793,20 @@ fn render_sidebar_shortcuts(f: &mut Frame, ollama_state: &OllamaState, area: Rec
                 "Ctrl+S: Save session",
                 "Ctrl+L: Clear chat",
                 "Enter: Send message",
-                "Esc: Close",
+                "Esc: Exit (save prompt)",
             ]
         }
         ActivePanel::ChatHistory => {
             vec![
                 "Tab: Switch panel",
                 "↑/↓: Navigate sessions",
-                "M: Cycle filters",
-                "/: Search mode",
+                "←/→: Change filters",
+                "Type: Search chats",
                 "F: Toggle favorite",
-                "Delete: Delete session",
+                "N: New chat",
                 "Enter: Load session",
-                "Esc: Close",
+                "Delete: Delete session",
+                "Esc: Exit (save prompt)",
             ]
         }
         ActivePanel::Settings => {
@@ -601,7 +815,7 @@ fn render_sidebar_shortcuts(f: &mut Frame, ollama_state: &OllamaState, area: Rec
                 "Enter: Edit system prompt",
                 "Space: Toggle auto-save",
                 "Ctrl+R: Refresh",
-                "Esc: Close",
+                "Esc: Exit (save prompt)",
             ]
         }
     };
@@ -750,23 +964,53 @@ fn render_available_models(f: &mut Frame, ollama_state: &OllamaState, area: Rect
 
 fn render_session_info(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let session_info = if let Some(session) = &ollama_state.current_session {
-        format!(
-            "📁 {}\n💬 {} messages\n🕒 {}\n{}",
-            if session.title.len() > 20 {
-                format!("{}...", session.title.chars().take(17).collect::<String>())
-            } else {
-                session.title.clone()
-            },
-            session.get_message_count(),
-            session.get_relative_time(),
-            if session.is_favorited {
-                "⭐ Favorited"
-            } else {
-                ""
+        let mut info_parts = vec![
+            format!(
+                "📁 {}",
+                if session.title.len() > 20 {
+                    format!("{}...", session.title.chars().take(17).collect::<String>())
+                } else {
+                    session.title.clone()
+                }
+            ),
+            format!("💬 {} messages", session.get_message_count()),
+            format!("🕒 {}", session.get_relative_time()),
+        ];
+
+        if session.session_stats.total_messages > 0 {
+            if session.session_stats.average_tokens_per_second > 0.0 {
+                info_parts.push(format!(
+                    "⚡ {:.1} tok/s avg",
+                    session.session_stats.average_tokens_per_second
+                ));
             }
-        )
+        }
+
+        if session.total_context_tokens > 0 {
+            info_parts.push(format!("🧠 {} tokens", session.total_context_tokens));
+        }
+
+        if session.is_favorited {
+            info_parts.push("⭐ Favorited".to_string());
+        }
+
+        if ollama_state.unsaved_changes {
+            info_parts.push("⚠️ Unsaved".to_string());
+        }
+
+        info_parts.join("\n")
     } else {
-        "📁 New conversation\n💬 0 messages\n🕒 now".to_string()
+        let mut info_parts = vec![
+            "📁 New conversation".to_string(),
+            "💬 0 messages".to_string(),
+            "🕒 now".to_string(),
+        ];
+
+        if ollama_state.unsaved_changes {
+            info_parts.push("⚠️ Unsaved".to_string());
+        }
+
+        info_parts.join("\n")
     };
 
     let session_block = Block::default()
@@ -831,12 +1075,8 @@ fn render_history_manager(f: &mut Frame, ollama_state: &OllamaState, area: Rect)
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Header
-            Constraint::Length(3), // Filter selection
-            Constraint::Length(if ollama_state.history_filter == HistoryFilter::Search {
-                3
-            } else {
-                0
-            }), // Search
+            Constraint::Length(6), // Filter selection (4 filters + borders)
+            Constraint::Length(3), // Search box (always visible)
             Constraint::Min(4),    // Sessions list
         ])
         .split(area);
@@ -852,16 +1092,14 @@ fn render_history_manager(f: &mut Frame, ollama_state: &OllamaState, area: Rect)
         .alignment(Alignment::Center);
     f.render_widget(header, layout[0]);
 
-    // Filter selection
+    // Filter selection (always visible)
     render_history_filters(f, ollama_state, layout[1]);
 
-    // Search box (conditional) and sessions list
-    if ollama_state.history_filter == HistoryFilter::Search {
-        render_search_input(f, ollama_state, layout[2]);
-        render_sessions_list(f, ollama_state, layout[3]);
-    } else {
-        render_sessions_list(f, ollama_state, layout[2]);
-    };
+    // Search box (always visible)
+    render_search_input(f, ollama_state, layout[2]);
+
+    // Sessions list
+    render_sessions_list(f, ollama_state, layout[3]);
 }
 
 fn render_history_filters(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
@@ -870,7 +1108,6 @@ fn render_history_filters(f: &mut Frame, ollama_state: &OllamaState, area: Rect)
         ("🕒", "Recent", HistoryFilter::Recent),
         ("⭐", "Favorites", HistoryFilter::Favorites),
         ("📋", "Snippet", HistoryFilter::CurrentSnippet),
-        ("🔍", "Search", HistoryFilter::Search),
     ];
 
     let filter_items: Vec<ListItem> = filters
@@ -895,7 +1132,7 @@ fn render_history_filters(f: &mut Frame, ollama_state: &OllamaState, area: Rect)
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(Color::Blue))
-        .title(" Filter ");
+        .title(" Filters (←/→ to navigate) ");
 
     let filter_list = List::new(filter_items)
         .block(filter_block)
@@ -932,13 +1169,6 @@ fn render_sessions_list(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
             }
             HistoryFilter::Favorites => {
                 "No favorite conversations yet\n\nPress 'F' to favorite a chat!"
-            }
-            HistoryFilter::Search => {
-                if ollama_state.search_query.is_empty() {
-                    "Enter search terms above..."
-                } else {
-                    "No conversations match your search"
-                }
             }
         };
 
@@ -1005,14 +1235,23 @@ fn render_sessions_list(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
             };
 
             let preview = session.get_preview();
-            let content = format!(
-                "{}{}\n   {} • {} • {} msgs",
-                indicators,
-                title,
+            let mut details = vec![
                 preview,
                 session.get_relative_time(),
-                session.get_message_count()
-            );
+                format!("{} msgs", session.get_message_count()),
+            ];
+
+            // Add performance metrics if available
+            if session.session_stats.total_messages > 0
+                && session.session_stats.average_tokens_per_second > 0.0
+            {
+                details.push(format!(
+                    "{:.1} tok/s",
+                    session.session_stats.average_tokens_per_second
+                ));
+            }
+
+            let content = format!("{}{}\n   {}", indicators, title, details.join(" • "));
 
             ListItem::new(content).style(text_style)
         })
@@ -1259,7 +1498,22 @@ fn render_chat_header(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
         )
     } else {
         let session_info = if let Some(session) = &ollama_state.current_session {
-            format!(" • {} messages", session.get_message_count())
+            let mut info_parts = vec![format!("{} msgs", session.get_message_count())];
+
+            if session.session_stats.total_messages > 0 {
+                if session.session_stats.average_tokens_per_second > 0.0 {
+                    info_parts.push(format!(
+                        "avg {:.1} tok/s",
+                        session.session_stats.average_tokens_per_second
+                    ));
+                }
+
+                if session.total_context_tokens > 0 {
+                    info_parts.push(format!("{} tokens", session.total_context_tokens));
+                }
+            }
+
+            format!(" • {}", info_parts.join(" • "))
         } else {
             " • New conversation".to_string()
         };
@@ -1290,6 +1544,26 @@ fn render_chat_history(
     area: Rect,
     scrollbar_area: Rect,
 ) {
+    // Safe wrapper to catch any remaining issues
+    if let Err(_) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        render_chat_history_inner(f, ollama_state, area, scrollbar_area)
+    })) {
+        // Fallback rendering in case of panic
+        let error_text =
+            Paragraph::new("Error rendering chat history.\nPlease try creating a new session.")
+                .style(Style::default().fg(Color::Red))
+                .alignment(Alignment::Center);
+        f.render_widget(error_text, area);
+        return;
+    }
+}
+
+fn render_chat_history_inner(
+    f: &mut Frame,
+    ollama_state: &OllamaState,
+    area: Rect,
+    scrollbar_area: Rect,
+) {
     // Chat history container with rounded corners
     let chat_block = Block::default()
         .borders(Borders::ALL)
@@ -1307,6 +1581,15 @@ fn render_chat_history(
 
     // Create a snapshot of the conversation to prevent race conditions during streaming
     let conversation_snapshot = ollama_state.conversation.clone();
+
+    // Early return if no messages to render
+    if conversation_snapshot.is_empty() {
+        let empty_text = Paragraph::new("Start a conversation by typing below!")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        f.render_widget(empty_text, chat_inner);
+        return;
+    }
 
     // Calculate total height of all messages using the snapshot
     let mut total_height = 0;
@@ -1347,32 +1630,82 @@ fn render_chat_history(
             break;
         }
 
-        // Triple bounds check - ensure we have both message and height data
-        if idx >= conversation_snapshot.len() || idx >= message_heights.len() {
+        // Quadruple bounds check - ensure we have both message and height data
+        if idx >= conversation_snapshot.len()
+            || idx >= message_heights.len()
+            || conversation_snapshot.is_empty()
+            || message_heights.is_empty()
+        {
             break;
         }
 
-        let msg = &conversation_snapshot[idx];
+        let msg = if let Some(message) = conversation_snapshot.get(idx) {
+            message
+        } else {
+            continue; // Skip if message doesn't exist
+        };
         let first_line_offset = if idx == start_idx { start_offset } else { 0 };
 
-        // Determine message style based on role
-        let (role_text, style, icon) = match msg.role {
-            ChatRole::User => ("You", Style::default().fg(Color::Green), "👤"),
-            ChatRole::Assistant => ("Assistant", Style::default().fg(Color::Blue), "🤖"),
-            ChatRole::System => ("System", Style::default().fg(Color::Red), "⚙️"),
+        // Determine message style based on role and create title with metrics
+        let (_role_text, style, _icon, title_text) = match msg.role {
+            ChatRole::User => {
+                let title = if msg.context_length > 0 {
+                    format!("👤 You (context: {} msgs)", msg.context_length)
+                } else {
+                    "👤 You".to_string()
+                };
+                ("You", Style::default().fg(Color::Green), "👤", title)
+            }
+            ChatRole::Assistant => {
+                let mut title_parts = vec!["🤖 Assistant".to_string()];
+
+                if let Some(tps) = msg.metrics.tokens_per_second {
+                    title_parts.push(format!("{:.1} tok/s", tps));
+                }
+
+                if let Some(response_time) = msg.metrics.response_time_ms {
+                    if response_time < 1000 {
+                        title_parts.push(format!("{}ms", response_time));
+                    } else {
+                        title_parts.push(format!("{:.1}s", response_time as f64 / 1000.0));
+                    }
+                }
+
+                if msg.context_length > 0 {
+                    title_parts.push(format!("ctx:{}", msg.context_length));
+                }
+
+                let default_title = "🤖 Assistant".to_string();
+                let title = if title_parts.len() > 1 {
+                    let first = title_parts.get(0).unwrap_or(&default_title);
+                    let rest: Vec<&String> = title_parts.iter().skip(1).collect();
+                    let rest_str = rest
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" • ");
+                    format!("{} ({})", first, rest_str)
+                } else {
+                    title_parts.get(0).unwrap_or(&default_title).clone()
+                };
+
+                ("Assistant", Style::default().fg(Color::Blue), "🤖", title)
+            }
+            ChatRole::System => (
+                "System",
+                Style::default().fg(Color::Red),
+                "⚙️",
+                "⚙️ System".to_string(),
+            ),
         };
 
-        // Create message block
         let msg_block = Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(style)
-            .title(Span::styled(
-                format!("{} {}", icon, role_text),
-                style.add_modifier(Modifier::BOLD),
-            ));
+            .title(Span::styled(title_text, style.add_modifier(Modifier::BOLD)));
 
-        let msg_height = message_heights[idx];
+        let msg_height = message_heights.get(idx).copied().unwrap_or(5); // Safe fallback height
         let visible_height = msg_height
             .saturating_sub(first_line_offset)
             .min(chat_inner.height as usize - y_offset);
