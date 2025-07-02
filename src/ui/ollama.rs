@@ -1305,10 +1305,12 @@ fn render_chat_history(
     let chat_inner = chat_block.inner(area);
     f.render_widget(chat_block, area);
 
-    // Calculate total height of all messages
+    // Create a snapshot of the conversation to prevent race conditions during streaming
+    let conversation_snapshot = ollama_state.conversation.clone();
+
+    // Calculate total height of all messages using the snapshot
     let mut total_height = 0;
-    let message_heights: Vec<usize> = ollama_state
-        .conversation
+    let message_heights: Vec<usize> = conversation_snapshot
         .iter()
         .map(|msg| {
             let content_width = chat_inner.width.saturating_sub(4) as usize;
@@ -1323,12 +1325,13 @@ fn render_chat_history(
     let max_scroll = total_height.saturating_sub(chat_inner.height as usize);
     let scroll = ollama_state.scroll_position.min(max_scroll);
 
-    // Calculate which messages to display based on scroll position
+    // Calculate which messages to display based on scroll position with bounds checking
     let mut current_height = 0;
     let mut start_idx = 0;
     let mut start_offset = 0;
+    let safe_len = conversation_snapshot.len().min(message_heights.len());
 
-    for (idx, &height) in message_heights.iter().enumerate() {
+    for (idx, &height) in message_heights.iter().enumerate().take(safe_len) {
         if current_height + height > scroll {
             start_idx = idx;
             start_offset = scroll - current_height;
@@ -1337,14 +1340,19 @@ fn render_chat_history(
         current_height += height + 1;
     }
 
-    // Render visible messages
+    // Render visible messages with comprehensive bounds checking
     let mut y_offset: usize = 0;
-    for idx in start_idx..ollama_state.conversation.len() {
+    for idx in start_idx..safe_len {
         if y_offset >= chat_inner.height as usize {
             break;
         }
 
-        let msg = &ollama_state.conversation[idx];
+        // Triple bounds check - ensure we have both message and height data
+        if idx >= conversation_snapshot.len() || idx >= message_heights.len() {
+            break;
+        }
+
+        let msg = &conversation_snapshot[idx];
         let first_line_offset = if idx == start_idx { start_offset } else { 0 };
 
         // Determine message style based on role

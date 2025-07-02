@@ -1,9 +1,11 @@
 use crate::app::App;
 use anyhow::{Result, anyhow};
 use flume;
-use ollama_rs::{Ollama, generation::completion::request::GenerationRequest, models::ModelOptions};
+use ollama_rs::Ollama;
 use once_cell::sync::Lazy;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use reqwest;
+use serde_json;
 
 use tokio::runtime::Runtime;
 
@@ -44,15 +46,6 @@ pub fn get_ollama_receiver() -> flume::Receiver<OllamaMessage> {
 /// Creates a new Ollama client with default configuration
 fn create_ollama_client() -> Ollama {
     Ollama::new(OLLAMA_HOST.to_string(), OLLAMA_PORT)
-}
-
-/// Creates default model options for Ollama requests
-fn create_model_options() -> ModelOptions {
-    ModelOptions::default()
-        .temperature(OLLAMA_TEMPERATURE)
-        .num_predict(OLLAMA_NUM_PREDICT)
-        .top_k(OLLAMA_TOP_K)
-        .top_p(OLLAMA_TOP_P)
 }
 
 /// Determines if an error is a connection-related error
@@ -148,8 +141,6 @@ pub async fn send_message_to_ollama(
 ) -> Result<()> {
     let sender = get_ollama_sender();
 
-    let ollama = create_ollama_client();
-
     // Build conversation context
     let mut full_prompt = if !system_prompt.trim().is_empty() {
         format!("{}\n\n", system_prompt)
@@ -169,23 +160,103 @@ pub async fn send_message_to_ollama(
 
     full_prompt.push_str(&format!("User: {}\nAssistant: ", message));
 
-    let options = create_model_options();
-    let request = GenerationRequest::new(model.clone(), full_prompt).options(options);
+    // Use direct HTTP streaming for real-time responses
+    let client = reqwest::Client::new();
 
-    match ollama.generate(request).await {
-        Ok(res) => {
-            let response = if res.response.trim().is_empty() {
-                "I apologize, but I couldn't generate a response. Please try again.".to_string()
+    let request_body = serde_json::json!({
+        "model": model,
+        "prompt": full_prompt,
+        "stream": true,
+        "options": {
+            "temperature": OLLAMA_TEMPERATURE,
+            "num_predict": OLLAMA_NUM_PREDICT,
+            "top_k": OLLAMA_TOP_K,
+            "top_p": OLLAMA_TOP_P,
+        }
+    });
+
+    match client
+        .post(&format!(
+            "{}:{}{}",
+            OLLAMA_HOST, OLLAMA_PORT, "/api/generate"
+        ))
+        .json(&request_body)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                use futures::stream::StreamExt;
+
+                let mut stream = response.bytes_stream();
+                let mut buffer = String::new();
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            if let Ok(text) = std::str::from_utf8(&chunk) {
+                                // Each line should be a JSON object
+                                for line in text.lines() {
+                                    if line.trim().is_empty() {
+                                        continue;
+                                    }
+
+                                    if let Ok(json_response) =
+                                        serde_json::from_str::<serde_json::Value>(line)
+                                    {
+                                        if let Some(response_text) =
+                                            json_response.get("response").and_then(|r| r.as_str())
+                                        {
+                                            let is_done = json_response
+                                                .get("done")
+                                                .and_then(|d| d.as_bool())
+                                                .unwrap_or(false);
+
+                                            // Send each chunk immediately for real-time display
+                                            let chunk = OllamaMessage::ResponseChunk {
+                                                request_id,
+                                                content: response_text.to_string(),
+                                                done: is_done,
+                                            };
+                                            let _ = sender.send(chunk);
+
+                                            buffer.push_str(response_text);
+
+                                            if is_done {
+                                                return Ok(());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let error_msg = format!("Streaming error: {}", e);
+                            let error = OllamaMessage::Error {
+                                request_id,
+                                message: error_msg,
+                            };
+                            let _ = sender.send(error);
+                            return Err(e.into());
+                        }
+                    }
+                }
+
+                // If we reach here without a done=true response, send final marker
+                let final_chunk = OllamaMessage::ResponseChunk {
+                    request_id,
+                    content: String::new(),
+                    done: true,
+                };
+                let _ = sender.send(final_chunk);
             } else {
-                res.response
-            };
-
-            let chunk = OllamaMessage::ResponseChunk {
-                request_id,
-                content: response,
-                done: true,
-            };
-            let _ = sender.send(chunk);
+                let error_msg = format!("HTTP error: {}", response.status());
+                let error = OllamaMessage::Error {
+                    request_id,
+                    message: error_msg,
+                };
+                let _ = sender.send(error);
+            }
         }
         Err(e) => {
             let error_msg = if is_connection_error(&e.to_string()) {
@@ -261,37 +332,47 @@ pub fn process_ollama_messages(app: &mut App) {
                 } => {
                     // Only process if this matches the current pending request
                     if ollama_state.pending_response_id == Some(request_id) {
+                        // Skip empty content chunks unless it's the final marker
                         if content.trim().is_empty() && !done {
                             continue;
                         }
 
-                        // Add or update assistant response
-                        if let Some(last_msg) = ollama_state.conversation.last_mut() {
-                            if last_msg.role == ChatRole::Assistant && !done {
-                                last_msg.content.push_str(&content);
-                            } else if last_msg.role != ChatRole::Assistant || done {
+                        // Handle streaming chunks
+                        if !content.is_empty() {
+                            // Update typing indicator to show we're receiving content
+                            ollama_state.typing_indicator = "⚡ Receiving...".to_string();
+
+                            // Update or create assistant message in conversation
+                            if let Some(last_msg) = ollama_state.conversation.last_mut() {
+                                if last_msg.role == ChatRole::Assistant {
+                                    // Append to existing assistant message
+                                    last_msg.content.push_str(&content);
+                                } else {
+                                    // Create new assistant message
+                                    ollama_state.conversation.push(ChatMessage {
+                                        role: ChatRole::Assistant,
+                                        content: content.clone(),
+                                    });
+                                }
+                            } else {
+                                // First message in conversation
                                 ollama_state.conversation.push(ChatMessage {
                                     role: ChatRole::Assistant,
                                     content: content.clone(),
                                 });
                             }
-                        } else {
-                            ollama_state.conversation.push(ChatMessage {
-                                role: ChatRole::Assistant,
-                                content: content.clone(),
-                            });
-                        }
 
-                        // Update current session
-                        if let Some(session) = &mut ollama_state.current_session {
-                            if let Some(last_msg) = session.conversation.last_mut() {
-                                if last_msg.role == ChatRole::Assistant {
-                                    last_msg.content.push_str(&content);
+                            // Update current session
+                            if let Some(session) = &mut ollama_state.current_session {
+                                if let Some(last_msg) = session.conversation.last_mut() {
+                                    if last_msg.role == ChatRole::Assistant {
+                                        last_msg.content.push_str(&content);
+                                    } else {
+                                        session.add_message(ChatRole::Assistant, content.clone());
+                                    }
                                 } else {
                                     session.add_message(ChatRole::Assistant, content);
                                 }
-                            } else {
-                                session.add_message(ChatRole::Assistant, content);
                             }
                         }
 
@@ -300,11 +381,36 @@ pub fn process_ollama_messages(app: &mut App) {
                             ollama_state.pending_response_id = None;
                             ollama_state.typing_indicator.clear();
 
-                            // Auto-save if enabled
+                            // Auto-save if enabled and we have content
                             if ollama_state.auto_save_enabled {
                                 if let Some(current_session) = &mut ollama_state.current_session {
-                                    if let Some(storage) = &ollama_state.chat_storage {
-                                        let _ = storage.save_session(current_session);
+                                    if ollama_state.chat_storage.is_some() {
+                                        let save_result = {
+                                            let storage =
+                                                ollama_state.chat_storage.as_ref().unwrap();
+                                            storage.save_session(current_session)
+                                        };
+
+                                        match save_result {
+                                            Ok(_) => {
+                                                ollama_state.add_success_toast(
+                                                    "Chat saved! 💾".to_string(),
+                                                );
+                                                // Refresh the sessions list to show the updated session
+                                                if let Some(storage) = &ollama_state.chat_storage {
+                                                    if let Ok(sessions) =
+                                                        storage.load_all_sessions()
+                                                    {
+                                                        ollama_state.saved_sessions = sessions;
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {
+                                                ollama_state.add_error_toast(
+                                                    "Failed to save chat".to_string(),
+                                                );
+                                            }
+                                        }
                                     }
                                 } else if let Some(model) = ollama_state.get_selected_model() {
                                     // Create a new session if none exists
@@ -323,8 +429,33 @@ pub fn process_ollama_messages(app: &mut App) {
                                     new_session.conversation = ollama_state.conversation.clone();
 
                                     // Save the new session
-                                    if let Some(storage) = &ollama_state.chat_storage {
-                                        let _ = storage.save_session(&new_session);
+                                    if ollama_state.chat_storage.is_some() {
+                                        let save_result = {
+                                            let storage =
+                                                ollama_state.chat_storage.as_ref().unwrap();
+                                            storage.save_session(&new_session)
+                                        };
+
+                                        match save_result {
+                                            Ok(_) => {
+                                                ollama_state.add_success_toast(
+                                                    "New chat saved! 💾".to_string(),
+                                                );
+                                                // Refresh the sessions list to show the new session
+                                                if let Some(storage) = &ollama_state.chat_storage {
+                                                    if let Ok(sessions) =
+                                                        storage.load_all_sessions()
+                                                    {
+                                                        ollama_state.saved_sessions = sessions;
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {
+                                                ollama_state.add_error_toast(
+                                                    "Failed to save new chat".to_string(),
+                                                );
+                                            }
+                                        }
                                     }
 
                                     ollama_state.current_session = Some(new_session);
@@ -332,7 +463,7 @@ pub fn process_ollama_messages(app: &mut App) {
                             }
                         }
 
-                        // Auto-scroll to bottom
+                        // Auto-scroll to bottom on any content update
                         ollama_state.scroll_position = usize::MAX;
                     }
                 }
@@ -372,6 +503,77 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     ollama_state.editing_system_prompt = false;
                     ollama_state.system_prompt_buffer.clear();
                 } else {
+                    // Save current session before closing if there's content
+                    if let Some(current_session) = &mut ollama_state.current_session {
+                        if !current_session.conversation.is_empty() {
+                            if ollama_state.chat_storage.is_some() {
+                                let save_result = {
+                                    let storage = ollama_state.chat_storage.as_ref().unwrap();
+                                    storage.save_session(current_session)
+                                };
+
+                                match save_result {
+                                    Ok(_) => {
+                                        ollama_state
+                                            .add_success_toast("Chat saved! 💾".to_string());
+                                        // Refresh the sessions list to show the updated session
+                                        if let Some(storage) = &ollama_state.chat_storage {
+                                            if let Ok(sessions) = storage.load_all_sessions() {
+                                                ollama_state.saved_sessions = sessions;
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        ollama_state
+                                            .add_error_toast("Failed to save chat".to_string());
+                                    }
+                                }
+                            }
+                        }
+                    } else if !ollama_state.conversation.is_empty() {
+                        // Create and save a new session from current conversation
+                        if let Some(model) = ollama_state.get_selected_model() {
+                            let mut new_session = crate::ui::ollama::ChatSession::new(
+                                model.clone(),
+                                ollama_state.system_prompt.clone(),
+                            );
+
+                            // Associate with current snippet if available
+                            if let Some(snippet) = &ollama_state.current_snippet {
+                                new_session = new_session
+                                    .with_snippet(snippet, "Current Snippet".to_string());
+                            }
+
+                            // Copy conversation
+                            new_session.conversation = ollama_state.conversation.clone();
+
+                            // Save the new session
+                            if ollama_state.chat_storage.is_some() {
+                                let save_result = {
+                                    let storage = ollama_state.chat_storage.as_ref().unwrap();
+                                    storage.save_session(&new_session)
+                                };
+
+                                match save_result {
+                                    Ok(_) => {
+                                        ollama_state
+                                            .add_success_toast("Chat saved! 💾".to_string());
+                                        // Refresh the sessions list to show the new session
+                                        if let Some(storage) = &ollama_state.chat_storage {
+                                            if let Ok(sessions) = storage.load_all_sessions() {
+                                                ollama_state.saved_sessions = sessions;
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        ollama_state
+                                            .add_error_toast("Failed to save chat".to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Close Ollama interface
                     app.ollama_state = None;
                 }
@@ -409,99 +611,98 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             }
             KeyCode::Up => {
-                match ollama_state.active_panel {
-                    ActivePanel::CurrentChat => {
-                        if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            // Navigate models up (Ctrl+Up)
-                            if !ollama_state.models.is_empty()
-                                && ollama_state.selected_model_index > 0
-                            {
-                                ollama_state.selected_model_index -= 1;
-                                // Additional safety check to ensure index is still valid
-                                if ollama_state.selected_model_index < ollama_state.models.len() {
-                                    if let Some(model) = ollama_state.get_selected_model() {
-                                        ollama_state
-                                            .add_info_toast(format!("Selected model: {}", model));
-                                    }
-                                } else {
-                                    // Reset to safe index - only reset if models exist
-                                    if !ollama_state.models.is_empty() {
-                                        ollama_state.selected_model_index = 0;
-                                    }
-                                }
-                            } else if ollama_state.models.is_empty() {
-                                ollama_state.add_error_toast(
-                                    "No models available. Please install models first.".to_string(),
-                                );
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    // Navigate models up (Ctrl+Up) - works from any panel
+                    if !ollama_state.models.is_empty() && ollama_state.selected_model_index > 0 {
+                        ollama_state.selected_model_index -= 1;
+                        // Additional safety check to ensure index is still valid
+                        if ollama_state.selected_model_index < ollama_state.models.len() {
+                            if let Some(model) = ollama_state.get_selected_model() {
+                                ollama_state.add_info_toast(format!("Selected model: {}", model));
                             }
                         } else {
+                            // Reset to safe index - only reset if models exist
+                            if !ollama_state.models.is_empty() {
+                                ollama_state.selected_model_index = 0;
+                            }
+                        }
+                    } else if ollama_state.models.is_empty() {
+                        ollama_state.add_error_toast(
+                            "No models available. Please install models first.".to_string(),
+                        );
+                    }
+                } else {
+                    match ollama_state.active_panel {
+                        ActivePanel::CurrentChat => {
                             scroll_chat_up(ollama_state);
                         }
-                    }
-                    ActivePanel::ChatHistory => {
-                        // Navigate sessions up
-                        let filtered_sessions = ollama_state.get_filtered_sessions();
-                        if !filtered_sessions.is_empty() && ollama_state.selected_session_index > 0
-                        {
-                            ollama_state.selected_session_index -= 1;
-                        } else if filtered_sessions.is_empty() {
-                            ollama_state.add_info_toast("No chat sessions available.".to_string());
+                        ActivePanel::ChatHistory => {
+                            // Navigate sessions up
+                            let filtered_sessions = ollama_state.get_filtered_sessions();
+                            if !filtered_sessions.is_empty()
+                                && ollama_state.selected_session_index > 0
+                            {
+                                ollama_state.selected_session_index -= 1;
+                            } else if filtered_sessions.is_empty() {
+                                ollama_state
+                                    .add_info_toast("No chat sessions available.".to_string());
+                            }
                         }
-                    }
-                    ActivePanel::Settings => {
-                        // No action for settings
+                        ActivePanel::Settings => {
+                            // Allow scrolling in chat even when in settings panel
+                            scroll_chat_up(ollama_state);
+                        }
                     }
                 }
             }
             KeyCode::Down => {
-                // Safety check: ensure we're in the expected panel for this operation
-                match ollama_state.active_panel {
-                    ActivePanel::CurrentChat => {
-                        if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            // Navigate models down (Ctrl+Down)
-                            if !ollama_state.models.is_empty()
-                                && ollama_state.selected_model_index
-                                    < ollama_state.models.len().saturating_sub(1)
-                            {
-                                ollama_state.selected_model_index += 1;
-                                // Additional safety check to ensure index is still valid
-                                if ollama_state.selected_model_index < ollama_state.models.len() {
-                                    if let Some(model) = ollama_state.get_selected_model() {
-                                        ollama_state
-                                            .add_info_toast(format!("Selected model: {}", model));
-                                    }
-                                } else {
-                                    // Reset to safe index - only if models exist
-                                    if !ollama_state.models.is_empty() {
-                                        ollama_state.selected_model_index =
-                                            ollama_state.models.len() - 1;
-                                    } else {
-                                        ollama_state.selected_model_index = 0;
-                                    }
-                                }
-                            } else if ollama_state.models.is_empty() {
-                                ollama_state.add_error_toast(
-                                    "No models available. Please install models first.".to_string(),
-                                );
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    // Navigate models down (Ctrl+Down) - works from any panel
+                    if !ollama_state.models.is_empty()
+                        && ollama_state.selected_model_index
+                            < ollama_state.models.len().saturating_sub(1)
+                    {
+                        ollama_state.selected_model_index += 1;
+                        // Additional safety check to ensure index is still valid
+                        if ollama_state.selected_model_index < ollama_state.models.len() {
+                            if let Some(model) = ollama_state.get_selected_model() {
+                                ollama_state.add_info_toast(format!("Selected model: {}", model));
                             }
                         } else {
+                            // Reset to safe index - only if models exist
+                            if !ollama_state.models.is_empty() {
+                                ollama_state.selected_model_index = ollama_state.models.len() - 1;
+                            } else {
+                                ollama_state.selected_model_index = 0;
+                            }
+                        }
+                    } else if ollama_state.models.is_empty() {
+                        ollama_state.add_error_toast(
+                            "No models available. Please install models first.".to_string(),
+                        );
+                    }
+                } else {
+                    match ollama_state.active_panel {
+                        ActivePanel::CurrentChat => {
                             scroll_chat_down(ollama_state);
                         }
-                    }
-                    ActivePanel::ChatHistory => {
-                        // Navigate sessions down
-                        let filtered_sessions = ollama_state.get_filtered_sessions();
-                        if !filtered_sessions.is_empty()
-                            && ollama_state.selected_session_index
-                                < filtered_sessions.len().saturating_sub(1)
-                        {
-                            ollama_state.selected_session_index += 1;
-                        } else if filtered_sessions.is_empty() {
-                            ollama_state.add_info_toast("No chat sessions available.".to_string());
+                        ActivePanel::ChatHistory => {
+                            // Navigate sessions down
+                            let filtered_sessions = ollama_state.get_filtered_sessions();
+                            if !filtered_sessions.is_empty()
+                                && ollama_state.selected_session_index
+                                    < filtered_sessions.len().saturating_sub(1)
+                            {
+                                ollama_state.selected_session_index += 1;
+                            } else if filtered_sessions.is_empty() {
+                                ollama_state
+                                    .add_info_toast("No chat sessions available.".to_string());
+                            }
                         }
-                    }
-                    ActivePanel::Settings => {
-                        // No action for settings
+                        ActivePanel::Settings => {
+                            // Allow scrolling in chat even when in settings panel
+                            scroll_chat_down(ollama_state);
+                        }
                     }
                 }
             }
@@ -554,29 +755,20 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             }
             KeyCode::PageUp => {
-                if ollama_state.active_panel == ActivePanel::CurrentChat {
-                    // Fast scroll up
-                    fast_scroll_chat_up(ollama_state);
-                }
+                // Fast scroll up - works from any panel to improve UX
+                fast_scroll_chat_up(ollama_state);
             }
             KeyCode::PageDown => {
-                if ollama_state.active_panel == ActivePanel::CurrentChat {
-                    // Fast scroll down
-                    fast_scroll_chat_down(ollama_state);
-                }
+                // Fast scroll down - works from any panel to improve UX
+                fast_scroll_chat_down(ollama_state);
             }
             KeyCode::Home => {
-                if ollama_state.active_panel == ActivePanel::CurrentChat {
-                    // Jump to top
-                    ollama_state.scroll_position = 0;
-                }
+                // Scroll to top of chat - works from any panel
+                ollama_state.scroll_position = 0;
             }
             KeyCode::End => {
-                if ollama_state.active_panel == ActivePanel::CurrentChat {
-                    // Jump to bottom
-                    // Will be clamped in render
-                    ollama_state.scroll_position = usize::MAX;
-                }
+                // Scroll to bottom of chat - works from any panel
+                ollama_state.scroll_position = usize::MAX;
             }
             KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 clear_conversation(ollama_state)?;
