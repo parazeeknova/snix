@@ -1,8 +1,3 @@
-//! Keyboard Input Handling Module
-//! This module provides comprehensive keyboard input handling for the RustUI application.
-//! It processes all user keyboard interactions and translates them into appropriate
-//! application state changes, navigation actions, and menu interactions.
-
 use crate::app::{App, AppState, CodeSnippetsState, InputMode, RecentSearchEntry, TreeItem};
 use crate::handlers::ollama;
 use crate::models::SnippetLanguage;
@@ -14,10 +9,303 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+struct NavigationHandler;
+
+impl NavigationHandler {
+    /// Handle tab navigation (left/right cycling)
+    fn handle_tab_navigation(key: KeyEvent, current_tab: usize, max_tab: usize) -> Option<usize> {
+        match key.code {
+            KeyCode::Left | KeyCode::BackTab => Some(if current_tab == 0 {
+                max_tab
+            } else {
+                current_tab - 1
+            }),
+            KeyCode::Right | KeyCode::Tab => Some((current_tab + 1) % (max_tab + 1)),
+            _ => None,
+        }
+    }
+}
+
+/// Common search functionality
+struct SearchHandler;
+
+impl SearchHandler {
+    /// Activate search mode with common setup
+    fn activate_search_mode(app: &mut App) {
+        app.clear_messages();
+        app.input_mode = InputMode::Search;
+        app.search_query.clear();
+        app.input_buffer.clear();
+        app.search_results.clear();
+        app.selected_search_result = 0;
+        app.selected_recent_search = 0;
+        app.needs_redraw = true;
+        app.set_success_message("Search mode activated. Type to search...".to_string());
+    }
+
+    /// Handle search result navigation
+    fn handle_search_navigation(key: KeyEvent, app: &mut App) -> bool {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                if !app.search_results.is_empty() {
+                    app.selected_search_result = if app.selected_search_result > 0 {
+                        app.selected_search_result - 1
+                    } else {
+                        app.search_results.len() - 1
+                    };
+                    app.set_success_message(format!(
+                        "Selected result {}/{}",
+                        app.selected_search_result + 1,
+                        app.search_results.len()
+                    ));
+                } else if !app.recent_searches.is_empty() && app.search_query.is_empty() {
+                    app.selected_recent_search = if app.selected_recent_search > 0 {
+                        app.selected_recent_search - 1
+                    } else {
+                        app.recent_searches.len() - 1
+                    };
+                }
+                app.needs_redraw = true;
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !app.search_results.is_empty() {
+                    app.selected_search_result =
+                        (app.selected_search_result + 1) % app.search_results.len();
+                    app.set_success_message(format!(
+                        "Selected result {}/{}",
+                        app.selected_search_result + 1,
+                        app.search_results.len()
+                    ));
+                } else if !app.recent_searches.is_empty() && app.search_query.is_empty() {
+                    app.selected_recent_search =
+                        (app.selected_recent_search + 1) % app.recent_searches.len();
+                }
+                app.needs_redraw = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Handle search query input and execution
+    fn handle_search_input(key: KeyEvent, app: &mut App) -> bool {
+        match key.code {
+            KeyCode::Char(c) => {
+                app.search_query.push(c);
+                let query = app.search_query.clone();
+                let count = app.perform_search(&query);
+                app.set_success_message(format!("Found {} results for '{}'", count, query));
+                app.needs_redraw = true;
+                true
+            }
+            KeyCode::Backspace => {
+                if !app.search_query.is_empty() {
+                    app.search_query.pop();
+                    if app.search_query.is_empty() {
+                        app.search_results.clear();
+                        app.selected_search_result = 0;
+                        app.set_success_message("Type to search".to_string());
+                    } else {
+                        let query = app.search_query.clone();
+                        let count = app.perform_search(&query);
+                        app.set_success_message(format!("Found {} results for '{}'", count, query));
+                    }
+                }
+                app.needs_redraw = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Close search mode and save recent search if applicable
+    fn close_search_mode(app: &mut App) {
+        app.input_mode = InputMode::Normal;
+
+        // Save to recent searches only if not empty
+        if !app.search_query.is_empty() {
+            let query = app.search_query.clone();
+            let result_count = app.search_results.len();
+            if !app.recent_searches.iter().any(|entry| entry.query == query) {
+                let entry = RecentSearchEntry::new(query, result_count);
+                app.recent_searches.insert(0, entry);
+                // Limit to 10 recent searches
+                if app.recent_searches.len() > 10 {
+                    app.recent_searches.pop();
+                }
+            }
+        }
+
+        app.search_query.clear();
+        app.search_results.clear();
+        app.selected_search_result = 0;
+        app.selected_recent_search = 0;
+        app.clear_messages();
+    }
+}
+
+/// Common Ollama chat functionality
+struct OllamaHandler;
+
+impl OllamaHandler {
+    /// Initialize and open Ollama chat for a snippet
+    fn open_snippet_chat(app: &mut App, snippet_id: uuid::Uuid) -> bool {
+        if let Some(snippet) = app.snippet_database.snippets.get(&snippet_id) {
+            // Initialize Ollama state if needed
+            if app.ollama_state.is_none() {
+                app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
+            }
+
+            if let Some(ollama_state) = &mut app.ollama_state {
+                ollama_state.conversation.clear();
+                ollama_state.scroll_position = 0;
+                ollama_state.current_snippet = Some(snippet.content.clone());
+
+                // Create enhanced system prompt with snippet context
+                let enhanced_system_prompt = ollama::create_snippet_system_prompt(
+                    &snippet.language.to_string(),
+                    &snippet.title,
+                    &snippet.content,
+                );
+
+                ollama_state.system_prompt = enhanced_system_prompt;
+                ollama_state.show_popup = true;
+                ollama_state.models.clear();
+                ollama_state.loading_models = true;
+                ollama_state.error_message = None;
+
+                let snippet_info = format!(
+                    " Working with {} snippet: '{}'",
+                    snippet.language.to_string(),
+                    snippet.title
+                );
+                ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
+
+                if let Err(e) = ollama::fetch_ollama_models(app) {
+                    app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
+                }
+                return true;
+            }
+        }
+        app.set_error_message("Select a snippet first".to_string());
+        false
+    }
+}
+
+/// Common input handling patterns
+struct InputHandler;
+
+impl InputHandler {
+    /// Handle common escape behavior across input modes
+    fn handle_escape(app: &mut App, clear_input: bool) {
+        app.input_mode = InputMode::Normal;
+        if clear_input {
+            app.input_buffer.clear();
+            app.pending_snippet_title.clear();
+        }
+        app.clear_messages();
+    }
+
+    /// Handle selection navigation for language/color picking
+    fn handle_selection_navigation(key: KeyEvent, current: &mut usize, max_items: usize) -> bool {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                *current = if *current == 0 {
+                    max_items - 1
+                } else {
+                    *current - 1
+                };
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                *current = (*current + 1) % max_items;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Common clipboard operations
+struct ClipboardHandler;
+
+impl ClipboardHandler {
+    /// Copy text to clipboard using available utilities
+    fn copy_to_clipboard(content: &str) -> bool {
+        let commands = [
+            ("xclip", vec!["-selection", "clipboard"]),
+            ("wl-copy", vec![]),
+            ("termux-clipboard-set", vec![]),
+        ];
+
+        for (cmd, args) in &commands {
+            if let Ok(mut process) = Command::new(cmd).args(args).stdin(Stdio::piped()).spawn() {
+                if let Some(stdin) = process.stdin.as_mut() {
+                    if stdin.write_all(content.as_bytes()).is_ok() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Language detection and parsing utilities
+struct LanguageDetector;
+
+impl LanguageDetector {
+    /// Parse title and language from input string with file extension
+    fn parse_title_and_language(input: &str) -> (String, SnippetLanguage) {
+        if input.contains('.') {
+            let parts: Vec<&str> = input.rsplitn(2, '.').collect();
+            let extension = parts[0].to_lowercase();
+            let title = parts[1].to_string();
+            let language = Self::language_from_extension(&extension);
+            (title, language)
+        } else {
+            (input.to_string(), SnippetLanguage::Text)
+        }
+    }
+
+    /// Map file extension to SnippetLanguage
+    fn language_from_extension(extension: &str) -> SnippetLanguage {
+        match extension {
+            "rs" => SnippetLanguage::Rust,
+            "js" => SnippetLanguage::JavaScript,
+            "ts" => SnippetLanguage::TypeScript,
+            "py" => SnippetLanguage::Python,
+            "go" => SnippetLanguage::Go,
+            "java" => SnippetLanguage::Java,
+            "c" => SnippetLanguage::C,
+            "cpp" | "cc" | "cxx" => SnippetLanguage::Cpp,
+            "cs" => SnippetLanguage::CSharp,
+            "php" => SnippetLanguage::PHP,
+            "rb" => SnippetLanguage::Ruby,
+            "swift" => SnippetLanguage::Swift,
+            "kt" => SnippetLanguage::Kotlin,
+            "dart" => SnippetLanguage::Dart,
+            "html" => SnippetLanguage::HTML,
+            "css" => SnippetLanguage::CSS,
+            "scss" => SnippetLanguage::SCSS,
+            "sql" => SnippetLanguage::SQL,
+            "sh" | "bash" => SnippetLanguage::Bash,
+            "ps1" => SnippetLanguage::PowerShell,
+            "yml" | "yaml" => SnippetLanguage::Yaml,
+            "json" => SnippetLanguage::Json,
+            "xml" => SnippetLanguage::Xml,
+            "md" => SnippetLanguage::Markdown,
+            "dockerfile" => SnippetLanguage::Dockerfile,
+            "toml" => SnippetLanguage::Toml,
+            "ini" => SnippetLanguage::Ini,
+            "conf" | "config" => SnippetLanguage::Config,
+            _ => SnippetLanguage::Text,
+        }
+    }
+}
+
 /// Main keyboard event handler and dispatcher
-/// This is the primary entry point for all keyboard input processing. It receives
-/// key events from the terminal and routes them to appropriate specialized handlers
-/// based on the current application state.
 pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
     // Handle Ollama popup if it's active
     if let Some(ollama_state) = &app.ollama_state {
@@ -31,46 +319,7 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
 
     // Handle special input modes first
     if app.input_mode == InputMode::SelectNotebookColor {
-        match key.code {
-            KeyCode::Esc => {
-                app.input_mode = InputMode::Normal;
-                app.clear_messages();
-                return false;
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                let colors = get_available_colors();
-                app.selected_language = if app.selected_language == 0 {
-                    colors.len() - 1
-                } else {
-                    app.selected_language - 1
-                };
-                return false;
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let colors = get_available_colors();
-                app.selected_language = (app.selected_language + 1) % colors.len();
-                return false;
-            }
-            KeyCode::Enter => {
-                if let Some(notebook_id) = app.current_notebook_id {
-                    match app.update_notebook_color(notebook_id, app.selected_language) {
-                        Ok(_) => {
-                            app.set_success_message(
-                                "Notebook color updated successfully".to_string(),
-                            );
-                        }
-                        Err(e) => {
-                            app.set_error_message(e);
-                        }
-                    }
-                } else {
-                    app.set_error_message("No notebook selected".to_string());
-                }
-                app.input_mode = InputMode::Normal;
-                return false;
-            }
-            _ => {}
-        }
+        return handle_notebook_color_selection(key, app);
     }
 
     // Handle other input modes
@@ -79,7 +328,7 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
     }
 
     match key.code {
-        // Global quit command - works from any page (Hopefully !!)
+        // Global quit command - works from any page
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             if app.state == AppState::StartPage || app.state != AppState::CodeSnippets {
                 return true;
@@ -90,23 +339,22 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
         // Help menu toggle (works from any page)
         KeyCode::Char('?') => {
             app.clear_messages();
-            if app.input_mode == InputMode::HelpMenu {
-                app.input_mode = InputMode::Normal;
+            app.input_mode = if app.input_mode == InputMode::HelpMenu {
+                InputMode::Normal
             } else {
-                app.input_mode = InputMode::HelpMenu;
-            }
+                InputMode::HelpMenu
+            };
             false
         }
 
-        // Global back navigation - only works if there's history to go back to
+        // Global back navigation
         KeyCode::Backspace => {
-            // Don't trigger back navigation when in import path popup - fixes bug for import autocomplete
+            // Don't trigger back navigation when in import path popup
             if let (AppState::ExportImport, Some(export_state)) =
                 (&app.state, &app.export_import_state)
             {
                 if export_state.mode == crate::ui::export_import::ExportImportMode::ImportPathPopup
                 {
-                    // Let the mode-specific handler deal with backspace
                     return handle_export_import_keys(key, app);
                 }
             }
@@ -127,15 +375,52 @@ pub fn handle_key_events(key: KeyEvent, app: &mut App) -> bool {
     }
 }
 
+/// Handle notebook color selection input mode
+fn handle_notebook_color_selection(key: KeyEvent, app: &mut App) -> bool {
+    match key.code {
+        KeyCode::Esc => {
+            app.input_mode = InputMode::Normal;
+            app.clear_messages();
+            false
+        }
+        KeyCode::Up | KeyCode::Down | KeyCode::Char('k') | KeyCode::Char('j') => {
+            let colors = get_available_colors();
+            if InputHandler::handle_selection_navigation(
+                key,
+                &mut app.selected_language,
+                colors.len(),
+            ) {
+                // Color selection changed, no message needed
+            }
+            false
+        }
+        KeyCode::Enter => {
+            if let Some(notebook_id) = app.current_notebook_id {
+                match app.update_notebook_color(notebook_id, app.selected_language) {
+                    Ok(_) => {
+                        app.set_success_message("Notebook color updated successfully".to_string());
+                    }
+                    Err(e) => {
+                        app.set_error_message(e);
+                    }
+                }
+            } else {
+                app.set_error_message("No notebook selected".to_string());
+            }
+            app.input_mode = InputMode::Normal;
+            false
+        }
+        _ => false,
+    }
+}
+
 /// Handles keyboard input for input mode in code snippets
 fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
     // Special case for search mode - direct character input to search query
     if app.input_mode == InputMode::Search {
         match key.code {
             KeyCode::Esc => {
-                app.input_mode = InputMode::Normal;
-                app.search_query.clear();
-                app.clear_messages();
+                SearchHandler::close_search_mode(app);
                 app.set_success_message("Search closed".to_string());
                 false
             }
@@ -150,76 +435,22 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 }
                 false
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                // Navigate search results
-                if !app.search_results.is_empty() {
-                    if app.selected_search_result > 0 {
-                        app.selected_search_result -= 1;
-                    } else {
-                        app.selected_search_result = app.search_results.len() - 1;
-                    }
-                    app.set_success_message(format!(
-                        "Selected result {}/{}",
-                        app.selected_search_result + 1,
-                        app.search_results.len()
-                    ));
+            _ => {
+                // Try navigation first, then input
+                if SearchHandler::handle_search_navigation(key, app) {
+                    false
+                } else if SearchHandler::handle_search_input(key, app) {
+                    false
+                } else {
+                    false
                 }
-                false
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                // Navigate search results
-                if !app.search_results.is_empty() {
-                    app.selected_search_result =
-                        (app.selected_search_result + 1) % app.search_results.len();
-                    app.set_success_message(format!(
-                        "Selected result {}/{}",
-                        app.selected_search_result + 1,
-                        app.search_results.len()
-                    ));
-                }
-                false
-            }
-            KeyCode::Char(c) => {
-                app.search_query.push(c);
-
-                // Perform search with updated query
-                let query = app.search_query.clone();
-                let count = app.perform_search(&query);
-                app.set_success_message(format!(
-                    "Found {} results for '{}'",
-                    count, app.search_query
-                ));
-                false
-            }
-            KeyCode::Backspace => {
-                if !app.search_query.is_empty() {
-                    app.search_query.pop();
-
-                    // Perform search with updated query
-                    let query = app.search_query.clone();
-                    let count = app.perform_search(&query);
-                    if !app.search_query.is_empty() {
-                        app.set_success_message(format!(
-                            "Found {} results for '{}'",
-                            count, app.search_query
-                        ));
-                    } else {
-                        app.set_success_message("Search query cleared".to_string());
-                    }
-                }
-                false
-            }
-            _ => false,
         }
     } else {
         // Regular input mode handling for other modes
         match key.code {
             KeyCode::Esc => {
-                // Close any input mode including help menu
-                app.input_mode = InputMode::Normal;
-                app.input_buffer.clear();
-                app.pending_snippet_title.clear();
-                app.clear_messages();
+                InputHandler::handle_escape(app, true);
                 false
             }
             KeyCode::Enter => {
@@ -286,47 +517,8 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                     }
                     InputMode::CreateSnippet => {
                         if !input.is_empty() {
-                            let (title, language) = if input.contains('.') {
-                                let parts: Vec<&str> = input.rsplitn(2, '.').collect();
-                                let extension = parts[0].to_lowercase();
-                                let title = parts[1].to_string();
-
-                                let language = match extension.as_str() {
-                                    "rs" => SnippetLanguage::Rust,
-                                    "js" => SnippetLanguage::JavaScript,
-                                    "ts" => SnippetLanguage::TypeScript,
-                                    "py" => SnippetLanguage::Python,
-                                    "go" => SnippetLanguage::Go,
-                                    "java" => SnippetLanguage::Java,
-                                    "c" => SnippetLanguage::C,
-                                    "cpp" | "cc" | "cxx" => SnippetLanguage::Cpp,
-                                    "cs" => SnippetLanguage::CSharp,
-                                    "php" => SnippetLanguage::PHP,
-                                    "rb" => SnippetLanguage::Ruby,
-                                    "swift" => SnippetLanguage::Swift,
-                                    "kt" => SnippetLanguage::Kotlin,
-                                    "dart" => SnippetLanguage::Dart,
-                                    "html" => SnippetLanguage::HTML,
-                                    "css" => SnippetLanguage::CSS,
-                                    "scss" => SnippetLanguage::SCSS,
-                                    "sql" => SnippetLanguage::SQL,
-                                    "sh" | "bash" => SnippetLanguage::Bash,
-                                    "ps1" => SnippetLanguage::PowerShell,
-                                    "yml" | "yaml" => SnippetLanguage::Yaml,
-                                    "json" => SnippetLanguage::Json,
-                                    "xml" => SnippetLanguage::Xml,
-                                    "md" => SnippetLanguage::Markdown,
-                                    "dockerfile" => SnippetLanguage::Dockerfile,
-                                    "toml" => SnippetLanguage::Toml,
-                                    "ini" => SnippetLanguage::Ini,
-                                    "conf" | "config" => SnippetLanguage::Config,
-                                    _ => SnippetLanguage::Text,
-                                };
-
-                                (title, language)
-                            } else {
-                                (input, SnippetLanguage::Text)
-                            };
+                            let (title, language) =
+                                LanguageDetector::parse_title_and_language(&input);
 
                             if let Some(notebook_id) = get_current_notebook_id(app) {
                                 match app.create_snippet(title, language, notebook_id) {
@@ -484,18 +676,15 @@ fn handle_input_mode_keys(key: KeyEvent, app: &mut App) -> bool {
                 }
                 false
             }
-            KeyCode::Up | KeyCode::Char('k') if app.input_mode == InputMode::SelectLanguage => {
-                app.selected_language = if app.selected_language == 0 {
-                    get_available_languages().len() - 1
-                } else {
-                    app.selected_language - 1
-                };
-                false
-            }
-            // Get list of available languages for snippet creation
-            KeyCode::Down | KeyCode::Char('j') if app.input_mode == InputMode::SelectLanguage => {
-                app.selected_language =
-                    (app.selected_language + 1) % get_available_languages().len();
+            KeyCode::Up | KeyCode::Down | KeyCode::Char('k') | KeyCode::Char('j')
+                if app.input_mode == InputMode::SelectLanguage =>
+            {
+                let languages = get_available_languages();
+                InputHandler::handle_selection_navigation(
+                    key,
+                    &mut app.selected_language,
+                    languages.len(),
+                );
                 false
             }
             KeyCode::Char(c) => {
@@ -693,15 +882,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
 
         // Activate search mode with '/'
         KeyCode::Char('/') => {
-            app.clear_messages();
-            app.input_mode = InputMode::Search;
-            app.search_query.clear();
-            app.input_buffer.clear();
-            app.search_results.clear();
-            app.selected_search_result = 0;
-            app.selected_recent_search = 0;
-            app.needs_redraw = true;
-            app.set_success_message("Search mode activated. Type to search...".to_string());
+            SearchHandler::activate_search_mode(app);
             false
         }
 
@@ -882,40 +1063,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
             app.clear_messages();
             if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
                 if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
-                    // Try to use clipboard utilities in this order: xclip, wl-copy, termux-clipboard-set
-                    let success = if let Ok(mut xclip) = Command::new("xclip")
-                        .arg("-selection")
-                        .arg("clipboard")
-                        .stdin(Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(stdin) = xclip.stdin.as_mut() {
-                            stdin.write_all(snippet.content.as_bytes()).is_ok()
-                        } else {
-                            false
-                        }
-                    } else if let Ok(mut wlcopy) =
-                        Command::new("wl-copy").stdin(Stdio::piped()).spawn()
-                    {
-                        if let Some(stdin) = wlcopy.stdin.as_mut() {
-                            stdin.write_all(snippet.content.as_bytes()).is_ok()
-                        } else {
-                            false
-                        }
-                    } else if let Ok(mut termux) = Command::new("termux-clipboard-set")
-                        .stdin(Stdio::piped())
-                        .spawn()
-                    {
-                        if let Some(stdin) = termux.stdin.as_mut() {
-                            stdin.write_all(snippet.content.as_bytes()).is_ok()
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    };
-
-                    if success {
+                    if ClipboardHandler::copy_to_clipboard(&snippet.content) {
                         app.set_success_message(format!("'{}' copied to clipboard", snippet.title));
                     } else {
                         app.set_error_message("Failed to copy to clipboard (xclip, wl-copy, or termux-clipboard-set required)".to_string());
@@ -1014,43 +1162,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
         KeyCode::Char('l') => {
             app.clear_messages();
             if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
-                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
-                    if app.ollama_state.is_none() {
-                        app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
-                    }
-
-                    if let Some(ollama_state) = &mut app.ollama_state {
-                        ollama_state.conversation.clear();
-                        ollama_state.scroll_position = 0;
-                        ollama_state.current_snippet = Some(snippet.content.clone());
-
-                        // Create enhanced system prompt with snippet context
-                        let enhanced_system_prompt =
-                            crate::handlers::ollama::create_snippet_system_prompt(
-                                &snippet.language.to_string(),
-                                &snippet.title,
-                                &snippet.content,
-                            );
-
-                        ollama_state.system_prompt = enhanced_system_prompt.clone();
-
-                        ollama_state.show_popup = true;
-                        ollama_state.models.clear();
-                        ollama_state.loading_models = true;
-                        ollama_state.error_message = None;
-
-                        let snippet_info = format!(
-                            " Working with {} snippet: '{}'",
-                            snippet.language.to_string(),
-                            snippet.title
-                        );
-                        ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
-
-                        if let Err(e) = ollama::fetch_ollama_models(app) {
-                            app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
-                        }
-                    }
-                }
+                OllamaHandler::open_snippet_chat(app, *snippet_id);
             } else {
                 app.set_error_message("Select a snippet first".to_string());
             }
@@ -1076,53 +1188,14 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::U
 
         // Activate search mode with '/'
         KeyCode::Char('/') => {
-            app.clear_messages();
-            app.input_mode = InputMode::Search;
-            app.search_query.clear();
-            app.input_buffer.clear();
-            app.search_results.clear();
-            app.selected_search_result = 0;
-            app.selected_recent_search = 0;
-            app.needs_redraw = true;
-            app.set_success_message("Search mode activated. Type to search...".to_string());
+            SearchHandler::activate_search_mode(app);
             false
         }
 
         // Open snippet in Ollama chat
         KeyCode::Char('l') => {
             if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
-                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
-                    if app.ollama_state.is_none() {
-                        app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
-                    }
-
-                    if let Some(ollama_state) = &mut app.ollama_state {
-                        ollama_state.conversation.clear();
-                        ollama_state.scroll_position = 0;
-                        ollama_state.current_snippet = Some(snippet.content.clone());
-
-                        let enhanced_system_prompt =
-                            crate::handlers::ollama::create_snippet_system_prompt(
-                                &snippet.language.to_string(),
-                                &snippet.title,
-                                &snippet.content,
-                            );
-
-                        ollama_state.system_prompt = enhanced_system_prompt.clone();
-                        ollama_state.show_popup = true;
-                        ollama_state.models.clear();
-                        ollama_state.loading_models = true;
-                        ollama_state.error_message = None;
-
-                        // Add system message with snippet info for conversation history
-                        let snippet_info = format!(
-                            " Working with {} snippet: '{}'",
-                            snippet.language.to_string(),
-                            snippet.title
-                        );
-                        ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
-                    }
-                }
+                OllamaHandler::open_snippet_chat(app, *snippet_id);
             } else {
                 app.set_error_message("Select a snippet first".to_string());
             }
@@ -1149,74 +1222,13 @@ fn handle_snippet_editor_keys(key: KeyEvent, app: &mut App, _snippet_id: uuid::U
 fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         KeyCode::Esc => {
-            // Clear the search query when closing search
-            app.input_mode = InputMode::Normal;
-
-            // Save to recent searches only if not empty
-            if !app.search_query.is_empty() {
-                // Save with count = 0 if not already stored
-                let query = app.search_query.clone();
-                let result_count = app.search_results.len();
-                if !app.recent_searches.iter().any(|entry| entry.query == query) {
-                    let entry = RecentSearchEntry::new(query, result_count);
-                    app.recent_searches.insert(0, entry);
-                    // Limit to 10 recent searches
-                    if app.recent_searches.len() > 10 {
-                        app.recent_searches.pop();
-                    }
-                }
-            }
-
-            app.search_query.clear();
-            app.search_results.clear();
-            app.selected_search_result = 0;
-            app.selected_recent_search = 0;
-            app.clear_messages();
+            SearchHandler::close_search_mode(app);
             false
         }
 
         // Navigation of search results - simplified to always work
-        KeyCode::Up | KeyCode::Char('k') => {
-            if !app.search_results.is_empty() {
-                // Always navigate results if we have them
-                if app.selected_search_result > 0 {
-                    app.selected_search_result -= 1;
-                } else {
-                    app.selected_search_result = app.search_results.len() - 1;
-                }
-                app.set_success_message(format!(
-                    "Selected result {}/{}",
-                    app.selected_search_result + 1,
-                    app.search_results.len()
-                ));
-            } else if !app.recent_searches.is_empty() && app.search_query.is_empty() {
-                // Navigate recent searches if no results and no query
-                if app.selected_recent_search > 0 {
-                    app.selected_recent_search -= 1;
-                } else {
-                    app.selected_recent_search = app.recent_searches.len() - 1;
-                }
-            }
-            app.needs_redraw = true;
-            false
-        }
-
-        KeyCode::Down | KeyCode::Char('j') => {
-            if !app.search_results.is_empty() {
-                // Always navigate results if we have them
-                app.selected_search_result =
-                    (app.selected_search_result + 1) % app.search_results.len();
-                app.set_success_message(format!(
-                    "Selected result {}/{}",
-                    app.selected_search_result + 1,
-                    app.search_results.len()
-                ));
-            } else if !app.recent_searches.is_empty() && app.search_query.is_empty() {
-                // Navigate recent searches if no results and no query
-                app.selected_recent_search =
-                    (app.selected_recent_search + 1) % app.recent_searches.len();
-            }
-            app.needs_redraw = true;
+        KeyCode::Up | KeyCode::Down | KeyCode::Char('k') | KeyCode::Char('j') => {
+            SearchHandler::handle_search_navigation(key, app);
             false
         }
 
@@ -1254,29 +1266,8 @@ fn handle_search_keys(key: KeyEvent, app: &mut App) -> bool {
         }
 
         // Handle input for search
-        KeyCode::Char(c) => {
-            app.search_query.push(c);
-            let query = app.search_query.clone();
-            let count = app.perform_search(&query);
-            app.set_success_message(format!("Found {} results for '{}'", count, query));
-            app.needs_redraw = true;
-            false
-        }
-
-        KeyCode::Backspace => {
-            if !app.search_query.is_empty() {
-                app.search_query.pop();
-                if app.search_query.is_empty() {
-                    app.search_results.clear();
-                    app.selected_search_result = 0;
-                    app.set_success_message("Type to search".to_string());
-                } else {
-                    let query = app.search_query.clone();
-                    let count = app.perform_search(&query);
-                    app.set_success_message(format!("Found {} results for '{}'", count, query));
-                }
-            }
-            app.needs_redraw = true;
+        KeyCode::Char(_) | KeyCode::Backspace => {
+            SearchHandler::handle_search_input(key, app);
             false
         }
 
@@ -1450,15 +1441,13 @@ fn handle_start_page_keys(key: KeyEvent, app: &mut App) -> bool {
     }
 
     match key.code {
-        // Menu navigation - move selection up (vi-style 'k' and arrow key)
-        KeyCode::Up | KeyCode::Char('k') => {
-            app.previous_menu_item();
-            false
-        }
-
-        // Menu navigation - move selection down (vi-style 'j' and arrow key)
-        KeyCode::Down | KeyCode::Char('j') => {
-            app.next_menu_item();
+        // Menu navigation - move selection up/down (vi-style 'k'/'j' and arrow keys)
+        KeyCode::Up | KeyCode::Down | KeyCode::Char('k') | KeyCode::Char('j') => {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => app.previous_menu_item(),
+                KeyCode::Down | KeyCode::Char('j') => app.next_menu_item(),
+                _ => {}
+            }
             false
         }
 
@@ -1611,32 +1600,12 @@ fn handle_about_popup_keys(key: KeyEvent, app: &mut App) -> bool {
             app.show_about_popup = false;
             false
         }
-        KeyCode::Tab => {
-            // Cycle through tabs
-            app.selected_about_tab = (app.selected_about_tab + 1) % 5;
-            false
-        }
-        KeyCode::BackTab => {
-            // Cycle backward through tabs
-            app.selected_about_tab = if app.selected_about_tab == 0 {
-                4
-            } else {
-                app.selected_about_tab - 1
-            };
-            false
-        }
-        KeyCode::Right => {
-            // Next tab
-            app.selected_about_tab = (app.selected_about_tab + 1) % 5;
-            false
-        }
-        KeyCode::Left => {
-            // Previous tab
-            app.selected_about_tab = if app.selected_about_tab == 0 {
-                4
-            } else {
-                app.selected_about_tab - 1
-            };
+        KeyCode::Tab | KeyCode::Right | KeyCode::BackTab | KeyCode::Left => {
+            if let Some(new_tab) =
+                NavigationHandler::handle_tab_navigation(key, app.selected_about_tab, 4)
+            {
+                app.selected_about_tab = new_tab;
+            }
             false
         }
         _ => false,
@@ -1768,15 +1737,7 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
 
         // Activate search mode with '/'
         KeyCode::Char('/') => {
-            app.clear_messages();
-            app.input_mode = InputMode::Search;
-            app.search_query.clear();
-            app.input_buffer.clear();
-            app.search_results.clear();
-            app.selected_search_result = 0;
-            app.selected_recent_search = 0;
-            app.needs_redraw = true;
-            app.set_success_message("Search mode activated. Type to search...".to_string());
+            SearchHandler::activate_search_mode(app);
             false
         }
 
