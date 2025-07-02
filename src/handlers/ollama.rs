@@ -305,7 +305,7 @@ pub fn process_ollama_messages(app: &mut App) {
                 OllamaMessage::ModelsLoaded { models } => {
                     ollama_state.loading_models = false;
                     if models.is_empty() {
-                        ollama_state.error_message = Some("❌ No models found!\n\nTo fix this:\n1. Install Ollama from https://ollama.ai\n2. Run 'ollama serve' in terminal\n3. Install a model: 'ollama pull llama2'\n4. Restart this application".to_string());
+                        ollama_state.error_message = Some("󰅙 No models found!\n\nTo fix this:\n1. Install Ollama from https://ollama.ai\n2. Run 'ollama serve' in terminal\n3. Install a model: 'ollama pull llama2'\n4. Restart this application".to_string());
                     } else {
                         ollama_state.models = models;
                         // Auto-select first model if none selected
@@ -340,7 +340,7 @@ pub fn process_ollama_messages(app: &mut App) {
                             // Track performance metrics
                             ollama_state.add_response_chunk(&content);
                             ollama_state.typing_indicator = format!(
-                                "⚡ Receiving... ({} tokens)",
+                                " 󱍢 Receiving... ({} tokens)",
                                 ollama_state.current_message_token_count
                             );
 
@@ -423,9 +423,8 @@ pub fn process_ollama_messages(app: &mut App) {
 
                                         match save_result {
                                             Ok(_) => {
-                                                ollama_state.add_success_toast(
-                                                    "Chat saved! 💾".to_string(),
-                                                );
+                                                ollama_state
+                                                    .add_success_toast("Chat saved! 󰭻".to_string());
                                                 // Refresh the sessions list to show the updated session
                                                 if let Some(storage) = &ollama_state.chat_storage {
                                                     if let Ok(sessions) =
@@ -469,7 +468,7 @@ pub fn process_ollama_messages(app: &mut App) {
                                         match save_result {
                                             Ok(_) => {
                                                 ollama_state.add_success_toast(
-                                                    "New chat saved! 💾".to_string(),
+                                                    "New chat saved! 󰭻".to_string(),
                                                 );
                                                 // Refresh the sessions list to show the new session
                                                 if let Some(storage) = &ollama_state.chat_storage {
@@ -507,7 +506,7 @@ pub fn process_ollama_messages(app: &mut App) {
                             // Only add error message to chat for actual chat requests
                             ollama_state.conversation.push(ChatMessage {
                                 role: ChatRole::System,
-                                content: format!("❌ Error: {}", message),
+                                content: format!("󰅙 Error: {}", message),
                                 metrics: MessageMetrics::default(),
                                 context_length: 0,
                             });
@@ -753,7 +752,7 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                         ollama_state
                             .add_error_toast(format!("Failed to create new session: {}", e));
                     } else {
-                        ollama_state.add_success_toast("New session created! ✨".to_string());
+                        ollama_state.add_success_toast("New session created! ".to_string());
                     }
                 }
             }
@@ -789,21 +788,21 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 if let Err(e) = clear_conversation(ollama_state) {
                     ollama_state.add_error_toast(format!("Failed to clear conversation: {}", e));
                 } else {
-                    ollama_state.add_success_toast("Conversation cleared! 🧹".to_string());
+                    ollama_state.add_success_toast("Conversation cleared! 󰚃".to_string());
                 }
             }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Err(e) = ollama_state.create_new_session() {
                     ollama_state.add_error_toast(format!("Failed to create new session: {}", e));
                 } else {
-                    ollama_state.add_success_toast("New session created! ✨".to_string());
+                    ollama_state.add_success_toast("New session created! ".to_string());
                 }
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Err(e) = save_current_session(ollama_state) {
                     ollama_state.add_error_toast(format!("Failed to save session: {}", e));
                 } else {
-                    ollama_state.add_success_toast("Session saved! 💾".to_string());
+                    ollama_state.add_success_toast("Session saved! 󰭻".to_string());
                     // Refresh sessions list to show the updated session
                     if let Ok(_) = refresh_sessions(ollama_state) {
                         // Session list refreshed successfully
@@ -815,7 +814,7 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     ollama_state.models.clear();
                     ollama_state.selected_model_index = 0;
                     ollama_state.loading_models = true;
-                    ollama_state.error_message = Some("🔄 Refreshing models...".to_string());
+                    ollama_state.error_message = Some(" Refreshing models...".to_string());
 
                     // Trigger model refresh by directly using the global runtime
                     let sender = get_ollama_sender();
@@ -865,7 +864,7 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     if let Err(e) = refresh_sessions(ollama_state) {
                         ollama_state.add_error_toast(format!("Failed to refresh sessions: {}", e));
                     } else {
-                        ollama_state.add_success_toast("Sessions refreshed! 🔄".to_string());
+                        ollama_state.add_success_toast("Sessions refreshed! ".to_string());
                     }
                 }
             }

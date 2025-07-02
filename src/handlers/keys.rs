@@ -1040,7 +1040,7 @@ fn handle_notebook_list_keys(key: KeyEvent, app: &mut App) -> bool {
                         ollama_state.error_message = None;
 
                         let snippet_info = format!(
-                            "🔧 Working with {} snippet: '{}'",
+                            " Working with {} snippet: '{}'",
                             snippet.language.to_string(),
                             snippet.title
                         );
@@ -1116,7 +1116,7 @@ fn handle_notebook_view_keys(key: KeyEvent, app: &mut App, _notebook_id: uuid::U
 
                         // Add system message with snippet info for conversation history
                         let snippet_info = format!(
-                            "🔧 Working with {} snippet: '{}'",
+                            " Working with {} snippet: '{}'",
                             snippet.language.to_string(),
                             snippet.title
                         );
@@ -1810,7 +1810,7 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
                         ollama_state.error_message = None;
 
                         let snippet_info = format!(
-                            "🔧 Working with {} snippet: '{}'",
+                            " Working with {} snippet: '{}'",
                             snippet.language.to_string(),
                             snippet.title
                         );

@@ -110,7 +110,7 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &mut App) {
     let welcome_text = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "★ Welcome to Code Snippets Manager!",
+            " Welcome to Code Snippets Manager!",
             Style::default().fg(RosePine::LOVE).bold(),
         )),
         Line::from(""),
@@ -125,7 +125,7 @@ fn render_welcome_screen(frame: &mut Frame, area: Rect, app: &mut App) {
         Line::from("• Use vim/nvim to edit your snippets with full LSP support"),
         Line::from(""),
         Line::from(Span::styled(
-            "☀ Tips:",
+            "󰀨 Tips:",
             Style::default().fg(RosePine::GOLD).bold(),
         )),
         Line::from("• Use descriptive names for your notebooks"),
@@ -1269,7 +1269,7 @@ fn render_snippet_preview(
 
     // Associated Chats section (beside metadata, takes full height)
     let chats_block = Block::default()
-        .title(" 💬 Associated Chats ")
+        .title(" 󰭻 Associated Chats ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(Style::default().fg(RosePine::IRIS).bg(RosePine::SURFACE));
@@ -1295,17 +1295,17 @@ fn render_snippet_preview(
         let ollama_detected = app.ollama_state.is_some();
 
         if ollama_detected {
-            "   🤖 This code looks lonely!\n\n   Press 'L' to chat with AI about it\n   and make some digital friends 🎉"
+            "    This code looks lonely!\n\n   Press 'L' to chat with AI about it\n   and make some digital friends 󱚣"
                 .to_string()
         } else {
-            "   😴 Ollama is taking a nap...\n\n   Wake it up at ollama.ai\n   Then press 'L' for AI magic! ✨"
+            "    Ollama is taking a nap...\n\n   Wake it up at ollama.ai\n   Then press 'L' for AI magic! "
                 .to_string()
         }
     } else {
         let mut text = String::new();
 
         text.push_str(&format!(
-            "💬 {} Chat{} | 🎯 Press 1-{} to open\n",
+            "󰭻 {} Chat{} |  Press 1-{} to open\n",
             associated_chat_details.len(),
             if associated_chat_details.len() == 1 {
                 ""
@@ -1335,7 +1335,7 @@ fn render_snippet_preview(
                 chat.message_count,
                 chat.relative_time
             ));
-            text.push_str(&format!("   \"{}\" • 🤖 {}\n", prompt, chat.model_name));
+            text.push_str(&format!("   \"{}\" •  {}\n", prompt, chat.model_name));
         }
 
         let total_messages: usize = associated_chat_details
@@ -1348,7 +1348,7 @@ fn render_snippet_preview(
             .collect();
 
         text.push_str(&format!(
-            "📊 {} total • {} model{}: {}",
+            " {} total • {} model{}: {}",
             total_messages,
             unique_models.len(),
             if unique_models.len() == 1 { "" } else { "s" },

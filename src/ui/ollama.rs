@@ -558,9 +558,8 @@ pub fn render_ollama_popup(f: &mut Frame, app: &App, area: Rect) {
 
         f.render_widget(Clear, popup_area);
 
-        // Main container with rounded corners
         let main_block = Block::default()
-            .title("✨ Ollama AI Assistant")
+            .title("  Ollama AI Assistant")
             .title_style(
                 Style::default()
                     .fg(Color::Cyan)
@@ -614,9 +613,9 @@ fn render_toast_notifications(f: &mut Frame, ollama_state: &OllamaState, area: R
         }
 
         let (icon, color) = match toast.notification_type {
-            NotificationType::Success => ("✅", Color::Green),
-            NotificationType::Error => ("❌", Color::Red),
-            NotificationType::Info => ("ℹ️", Color::Blue),
+            NotificationType::Success => (" ", Color::Green),
+            NotificationType::Error => ("󰅙 ", Color::Red),
+            NotificationType::Info => (" ", Color::Blue),
         };
 
         let notification_block = Block::default()
@@ -637,7 +636,7 @@ fn render_toast_notifications(f: &mut Frame, ollama_state: &OllamaState, area: R
 }
 
 fn render_save_prompt(f: &mut Frame, area: Rect) {
-    let save_prompt_text = "💾 Save Session?\n\n\
+    let save_prompt_text = "󰆓 Save Session?\n\n\
         You have unsaved changes in your current chat session.\n\
         Would you like to save it before exiting?\n\n\
         Press 'Y' to save and exit\n\
@@ -653,7 +652,7 @@ fn render_save_prompt(f: &mut Frame, area: Rect) {
         )
         .block(
             Block::default()
-                .title("🚨 Unsaved Changes")
+                .title("󰀨 Unsaved Changes")
                 .borders(Borders::ALL)
                 .border_type(ratatui::widgets::BorderType::Double)
                 .border_style(Style::default().fg(Color::Yellow)),
@@ -667,7 +666,7 @@ fn render_loading_screen(f: &mut Frame, ollama_state: &OllamaState, area: Rect) 
     let loading_chars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
     let animation_char = loading_chars[ollama_state.loading_animation_frame % loading_chars.len()];
 
-    let loading_text = Paragraph::new(format!("🔄 Loading Ollama models... {}", animation_char))
+    let loading_text = Paragraph::new(format!(" Loading Ollama models... {}", animation_char))
         .alignment(Alignment::Center)
         .style(
             Style::default()
@@ -681,11 +680,11 @@ fn render_loading_screen(f: &mut Frame, ollama_state: &OllamaState, area: Rect) 
 fn render_error_screen(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let message = if let Some(error) = &ollama_state.error_message {
         format!(
-            "❌ Error: {}\n\n💡 Make sure Ollama is running and try again.\n\n🔧 You can start Ollama with: ollama serve",
+            "󰅙 Error: {}\n\n Make sure Ollama is running and try again.\n\n You can start Ollama with: ollama serve",
             error
         )
     } else {
-        "❌ No Ollama models found.\n\n💡 Make sure Ollama is installed and running.\n\n🔧 Install models with: ollama pull llama2".to_string()
+        "󰅙 No Ollama models found.\n\n Make sure Ollama is installed and running.\n\n Install models with: ollama pull llama2".to_string()
     };
 
     let error_text = Paragraph::new(message)
@@ -711,7 +710,7 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     if let Some(ollama_state) = &app.ollama_state {
         // Sidebar container with rounded corners
         let sidebar_block = Block::default()
-            .title("🎛️ Options")
+            .title(" 󰍻 Options")
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(Style::default().fg(Color::Blue));
@@ -724,9 +723,9 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         let sidebar_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(5), // Navigation (increased for all tabs to be visible)
+                Constraint::Length(5), // Navigation
                 Constraint::Min(5),    // Content
-                Constraint::Length(5), // Shortcuts (increased to 5 for 3 lines of shortcuts)
+                Constraint::Length(5), // Shortcuts
             ])
             .split(sidebar_inner);
 
@@ -747,9 +746,9 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_sidebar_navigation(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let panels = [
-        ("💬", "Current Chat", ActivePanel::CurrentChat),
-        ("📚", "Chat History", ActivePanel::ChatHistory),
-        ("⚙️", "Settings", ActivePanel::Settings),
+        ("󰭻 ", "Current Chat", ActivePanel::CurrentChat),
+        (" ", "Chat History", ActivePanel::ChatHistory),
+        (" ", "Settings", ActivePanel::Settings),
     ];
 
     let panel_items: Vec<ListItem> = panels
@@ -848,14 +847,14 @@ fn render_chat_options(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
         .constraints([
             Constraint::Length(1), // Header
             Constraint::Length(4), // Model info
-            Constraint::Length(6), // Available models section (new!)
+            Constraint::Length(6), // Available models section
             Constraint::Length(4), // Session info
             Constraint::Min(3),    // Status and controls
         ])
         .split(area);
 
     // Header
-    let header = Paragraph::new("💬 Current Chat")
+    let header = Paragraph::new(" 󰭻 Current Chat")
         .style(
             Style::default()
                 .fg(Color::Green)
@@ -864,16 +863,9 @@ fn render_chat_options(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
         .alignment(Alignment::Center);
     f.render_widget(header, layout[0]);
 
-    // Model information
     render_model_info(f, ollama_state, layout[1]);
-
-    // Available models section (new!)
     render_available_models(f, ollama_state, layout[2]);
-
-    // Session information
     render_session_info(f, ollama_state, layout[3]);
-
-    // Status and controls
     render_chat_status(f, ollama_state, layout[4]);
 }
 
@@ -884,14 +876,14 @@ fn render_model_info(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
         .clone();
 
     let model_status = if ollama_state.models.is_empty() {
-        "❌ No models available"
+        " 󰅙 No models available"
     } else if ollama_state.get_selected_model().is_some() {
-        "✅ Model ready"
+        " 󰗠 Model ready"
     } else {
-        "⚠️ Select a model"
+        " 󱇎 Select a model"
     };
 
-    let model_info = format!("🤖 Model: {}\n{}", model_name, model_status);
+    let model_info = format!("  Model: {}\n{}", model_name, model_status);
 
     let model_block = Block::default()
         .borders(Borders::ALL)
@@ -915,7 +907,7 @@ fn render_available_models(f: &mut Frame, ollama_state: &OllamaState, area: Rect
         .title(" Available Models ");
 
     if ollama_state.loading_models {
-        let loading_text = Paragraph::new("🔄 Loading models...")
+        let loading_text = Paragraph::new("  Loading models...")
             .block(models_block)
             .style(Style::default().fg(Color::Yellow))
             .alignment(Alignment::Center);
@@ -924,7 +916,7 @@ fn render_available_models(f: &mut Frame, ollama_state: &OllamaState, area: Rect
     }
 
     if ollama_state.models.is_empty() {
-        let error_text = Paragraph::new("❌ No models found\nInstall with:\nollama pull llama2")
+        let error_text = Paragraph::new("󰅙 No models found\nInstall with:\nollama pull llama2")
             .block(models_block)
             .style(Style::default().fg(Color::Red))
             .alignment(Alignment::Center)
@@ -949,7 +941,7 @@ fn render_available_models(f: &mut Frame, ollama_state: &OllamaState, area: Rect
                 Style::default().fg(Color::White)
             };
 
-            let icon = if is_selected { "🎯" } else { "🤖" };
+            let icon = if is_selected { "" } else { "" };
             let content = format!(" {} {}", icon, model);
             ListItem::new(content).style(style)
         })
@@ -966,48 +958,48 @@ fn render_session_info(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let session_info = if let Some(session) = &ollama_state.current_session {
         let mut info_parts = vec![
             format!(
-                "📁 {}",
+                "  {}",
                 if session.title.len() > 20 {
                     format!("{}...", session.title.chars().take(17).collect::<String>())
                 } else {
                     session.title.clone()
                 }
             ),
-            format!("💬 {} messages", session.get_message_count()),
-            format!("🕒 {}", session.get_relative_time()),
+            format!(" 󰭻 {} messages", session.get_message_count()),
+            format!(" 󱑉 {}", session.get_relative_time()),
         ];
 
         if session.session_stats.total_messages > 0 {
             if session.session_stats.average_tokens_per_second > 0.0 {
                 info_parts.push(format!(
-                    "⚡ {:.1} tok/s avg",
+                    " 󱐋 {:.1} tok/s avg",
                     session.session_stats.average_tokens_per_second
                 ));
             }
         }
 
         if session.total_context_tokens > 0 {
-            info_parts.push(format!("🧠 {} tokens", session.total_context_tokens));
+            info_parts.push(format!("  {} tokens", session.total_context_tokens));
         }
 
         if session.is_favorited {
-            info_parts.push("⭐ Favorited".to_string());
+            info_parts.push("  Favorited".to_string());
         }
 
         if ollama_state.unsaved_changes {
-            info_parts.push("⚠️ Unsaved".to_string());
+            info_parts.push(" 󰀨 Unsaved".to_string());
         }
 
         info_parts.join("\n")
     } else {
         let mut info_parts = vec![
-            "📁 New conversation".to_string(),
-            "💬 0 messages".to_string(),
-            "🕒 now".to_string(),
+            " 󱐏 New conversation".to_string(),
+            " 󰭻 0 messages".to_string(),
+            " 󰥔 now".to_string(),
         ];
 
         if ollama_state.unsaved_changes {
-            info_parts.push("⚠️ Unsaved".to_string());
+            info_parts.push(" 󰀨 Unsaved".to_string());
         }
 
         info_parts.join("\n")
@@ -1028,19 +1020,18 @@ fn render_session_info(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
 }
 
 fn render_chat_status(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
-    // Status only - no controls since they're now in the sidebar
     let status_text = if ollama_state.is_sending {
         format!(
-            "🔄 Generating response...\n{}",
+            "  Generating response...\n{}",
             ollama_state.typing_indicator
         )
     } else if ollama_state.loading_models {
-        "📥 Loading models...".to_string()
+        "  Loading models...".to_string()
     } else if ollama_state.get_selected_model().is_none() {
-        "⚠️ Select a model to start chatting\nUse Ctrl+↑/↓ to select a model".to_string()
+        " 󰀨 Select a model to start chatting\nUse Ctrl+↑/↓ to select a model".to_string()
     } else {
         format!(
-            "✅ Ready to chat\n💾 Auto-save: {}\n🤖 Current: {}",
+            " 󰗠 Ready to chat\n 󰆓 Auto-save: {}\n  Current: {}",
             if ollama_state.auto_save_enabled {
                 "On"
             } else {
@@ -1076,14 +1067,14 @@ fn render_history_manager(f: &mut Frame, ollama_state: &OllamaState, area: Rect)
         .constraints([
             Constraint::Length(1), // Header
             Constraint::Length(6), // Filter selection (4 filters + borders)
-            Constraint::Length(3), // Search box (always visible)
+            Constraint::Length(3), // Search box
             Constraint::Min(4),    // Sessions list
         ])
         .split(area);
 
     // Header with session count
     let sessions_count = ollama_state.get_filtered_sessions().len();
-    let header = Paragraph::new(format!("📚 Chat History ({})", sessions_count))
+    let header = Paragraph::new(format!(" Chat History ({})", sessions_count))
         .style(
             Style::default()
                 .fg(Color::Cyan)
@@ -1092,22 +1083,17 @@ fn render_history_manager(f: &mut Frame, ollama_state: &OllamaState, area: Rect)
         .alignment(Alignment::Center);
     f.render_widget(header, layout[0]);
 
-    // Filter selection (always visible)
     render_history_filters(f, ollama_state, layout[1]);
-
-    // Search box (always visible)
     render_search_input(f, ollama_state, layout[2]);
-
-    // Sessions list
     render_sessions_list(f, ollama_state, layout[3]);
 }
 
 fn render_history_filters(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let filters = [
-        ("📄", "All", HistoryFilter::All),
-        ("🕒", "Recent", HistoryFilter::Recent),
-        ("⭐", "Favorites", HistoryFilter::Favorites),
-        ("📋", "Snippet", HistoryFilter::CurrentSnippet),
+        (" 󰭹", "All", HistoryFilter::All),
+        (" 󰥔", "Recent", HistoryFilter::Recent),
+        (" ", "Favorites", HistoryFilter::Favorites),
+        (" 󰠮", "Snippet", HistoryFilter::CurrentSnippet),
     ];
 
     let filter_items: Vec<ListItem> = filters
@@ -1146,7 +1132,7 @@ fn render_search_input(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(Color::Yellow))
-        .title(" 🔍 Search ");
+        .title("  Search ");
 
     let search_text = Paragraph::new(format!("{}_", ollama_state.search_query))
         .block(search_block)
@@ -1219,12 +1205,12 @@ fn render_sessions_list(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
 
             let indicators = format!(
                 "{}{}{}",
-                if session.is_favorited { "⭐" } else { "" },
-                if is_current { "▶ " } else { "" },
+                if session.is_favorited { " " } else { "" },
+                if is_current { " " } else { "" },
                 if session.snippet_hash.is_some() {
-                    "📋 "
+                    "󰎚 "
                 } else {
-                    "💬 "
+                    "󰭻 "
                 }
             );
 
@@ -1277,12 +1263,12 @@ fn render_settings_panel(f: &mut Frame, ollama_state: &OllamaState, area: Rect) 
             Constraint::Length(1), // Header
             Constraint::Length(6), // Settings
             Constraint::Length(4), // System prompt
-            Constraint::Min(4),    // Storage stats (expanded to take remaining space)
+            Constraint::Min(4),    // Storage stats
         ])
         .split(area);
 
     // Header
-    let header = Paragraph::new("⚙️ Settings")
+    let header = Paragraph::new(" Settings")
         .style(
             Style::default()
                 .fg(Color::Magenta)
@@ -1303,9 +1289,9 @@ fn render_settings_panel(f: &mut Frame, ollama_state: &OllamaState, area: Rect) 
 
 fn render_settings_options(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let auto_save_status = if ollama_state.auto_save_enabled {
-        "✅ Enabled"
+        "󰗠 Enabled"
     } else {
-        "❌ Disabled"
+        "󰅙 Disabled"
     };
 
     let model_count = ollama_state.models.len();
@@ -1315,7 +1301,7 @@ fn render_settings_options(f: &mut Frame, ollama_state: &OllamaState, area: Rect
         .clone();
 
     let settings_text = format!(
-        "💾 Auto-save: {}\n🤖 Available models: {}\n📍 Current model: {}\n💬 Active conversations: {}\n📁 Storage: ~/.snix/ollama_chats/",
+        " 󰆓 Auto-save: {}\n  Available models: {}\n  Current model: {}\n 󰭻 Active conversations: {}\n  Storage: ~/.snix/ollama_chats/",
         auto_save_status,
         model_count,
         if current_model.len() > 15 {
@@ -1369,9 +1355,9 @@ fn render_system_prompt_section(f: &mut Frame, ollama_state: &OllamaState, area:
             Style::default().fg(Color::Magenta)
         })
         .title(if ollama_state.editing_system_prompt {
-            " ✏️ Editing System Prompt (Enter: Save, Esc: Cancel) "
+            "  Editing System Prompt (Enter: Save, Esc: Cancel) "
         } else {
-            " 🤖 System Prompt (Enter: Edit) "
+            "  System Prompt (Enter: Edit) "
         });
 
     let prompt_text = Paragraph::new(content.clone())
@@ -1395,21 +1381,21 @@ fn render_storage_stats(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
                 let _total_usage = stats.models.values().sum::<usize>();
 
                 format!(
-                    "💾 {:.1} KB storage used\n📊 {} sessions • {} models used\n💬 {} total messages",
+                    " 󰆓 {:.1} KB storage used\n  {} sessions • {} models used\n 󰭻 {} total messages",
                     size_kb, stats.total_sessions, models_count, stats.total_messages
                 )
             }
-            Err(_) => "❌ Unable to load statistics".to_string(),
+            Err(_) => "󰅙 Unable to load statistics".to_string(),
         }
     } else {
-        "❌ Storage not initialized".to_string()
+        "󰅙 Storage not initialized".to_string()
     };
 
     let stats_block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(Color::Green))
-        .title(" 📊 Storage Statistics ");
+        .title("  Storage Statistics ");
 
     let stats_paragraph = Paragraph::new(stats_text)
         .block(stats_block)
@@ -1430,7 +1416,7 @@ fn render_main_content(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_model_selection_prompt(f: &mut Frame, area: Rect) {
-    let message = "Welcome to Snix Chat! 🚀\n\n👈 Please select a model from the sidebar\n\n✨ Features:\n• Smart conversations with your code\n• Persistent chat history\n• Advanced search & filtering\n• Snippet integration\n\n💡 Tip: Use Tab to navigate between panels";
+    let message = "Welcome to Snix Chat! 󱓞\n\n  Please select a model from the sidebar\n\n  Features:\n• Smart conversations with your code\n• Persistent chat history\n• Advanced search & filtering\n• Snippet integration\n\n  Tip: Use Tab to navigate between panels";
 
     let prompt = Paragraph::new(message)
         .alignment(Alignment::Center)
@@ -1440,7 +1426,7 @@ fn render_model_selection_prompt(f: &mut Frame, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(ratatui::widgets::BorderType::Rounded)
-                .title(" 💬 Snix AI Chat ")
+                .title(" 󰭻 Snix AI Chat ")
                 .border_style(Style::default().fg(Color::Cyan)),
         );
 
@@ -1468,16 +1454,9 @@ fn render_chat_interface(f: &mut Frame, app: &App, area: Rect) {
             ])
             .split(chat_area);
 
-        // Header with model info
         render_chat_header(f, ollama_state, layout[0]);
-
-        // Chat history with scrollbar
         render_chat_history(f, ollama_state, layout[1], scrollbar_area);
-
-        // Input area
         render_chat_input(f, ollama_state, layout[2]);
-
-        // Footer with shortcuts
         render_chat_footer(f, ollama_state, layout[3]);
     }
 }
@@ -1492,10 +1471,7 @@ fn render_chat_header(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let animation_char = loading_chars[ollama_state.loading_animation_frame % loading_chars.len()];
 
     let header_content = if ollama_state.is_sending {
-        format!(
-            "🤖 {} {} Generating response...",
-            model_name, animation_char
-        )
+        format!(" {} {} Generating response...", model_name, animation_char)
     } else {
         let session_info = if let Some(session) = &ollama_state.current_session {
             let mut info_parts = vec![format!("{} msgs", session.get_message_count())];
@@ -1517,7 +1493,7 @@ fn render_chat_header(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
         } else {
             " • New conversation".to_string()
         };
-        format!("🤖 {}{}", model_name, session_info)
+        format!(" {}{}", model_name, session_info)
     };
 
     let header_block = Block::default()
@@ -1568,7 +1544,7 @@ fn render_chat_history_inner(
     let chat_block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" 💬 Conversation ")
+        .title(" 󰭻 Conversation ")
         .title_style(
             Style::default()
                 .fg(Color::Green)
@@ -1642,7 +1618,8 @@ fn render_chat_history_inner(
         let msg = if let Some(message) = conversation_snapshot.get(idx) {
             message
         } else {
-            continue; // Skip if message doesn't exist
+            // Skip if message doesn't exist
+            continue;
         };
         let first_line_offset = if idx == start_idx { start_offset } else { 0 };
 
@@ -1650,14 +1627,14 @@ fn render_chat_history_inner(
         let (_role_text, style, _icon, title_text) = match msg.role {
             ChatRole::User => {
                 let title = if msg.context_length > 0 {
-                    format!("👤 You (context: {} msgs)", msg.context_length)
+                    format!("  You (context: {} msgs)", msg.context_length)
                 } else {
-                    "👤 You".to_string()
+                    "  You".to_string()
                 };
-                ("You", Style::default().fg(Color::Green), "👤", title)
+                ("You", Style::default().fg(Color::Green), " ", title)
             }
             ChatRole::Assistant => {
-                let mut title_parts = vec!["🤖 Assistant".to_string()];
+                let mut title_parts = vec!["  Assistant".to_string()];
 
                 if let Some(tps) = msg.metrics.tokens_per_second {
                     title_parts.push(format!("{:.1} tok/s", tps));
@@ -1675,7 +1652,7 @@ fn render_chat_history_inner(
                     title_parts.push(format!("ctx:{}", msg.context_length));
                 }
 
-                let default_title = "🤖 Assistant".to_string();
+                let default_title = "   Assistant".to_string();
                 let title = if title_parts.len() > 1 {
                     let first = title_parts.get(0).unwrap_or(&default_title);
                     let rest: Vec<&String> = title_parts.iter().skip(1).collect();
@@ -1689,13 +1666,13 @@ fn render_chat_history_inner(
                     title_parts.get(0).unwrap_or(&default_title).clone()
                 };
 
-                ("Assistant", Style::default().fg(Color::Blue), "🤖", title)
+                ("Assistant", Style::default().fg(Color::Blue), "  ", title)
             }
             ChatRole::System => (
                 "System",
                 Style::default().fg(Color::Red),
-                "⚙️",
-                "⚙️ System".to_string(),
+                " ",
+                "  System".to_string(),
             ),
         };
 
@@ -1705,7 +1682,7 @@ fn render_chat_history_inner(
             .border_style(style)
             .title(Span::styled(title_text, style.add_modifier(Modifier::BOLD)));
 
-        let msg_height = message_heights.get(idx).copied().unwrap_or(5); // Safe fallback height
+        let msg_height = message_heights.get(idx).copied().unwrap_or(5);
         let visible_height = msg_height
             .saturating_sub(first_line_offset)
             .min(chat_inner.height as usize - y_offset);
@@ -1753,7 +1730,7 @@ fn render_chat_history_inner(
                 .border_type(ratatui::widgets::BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Yellow))
                 .title(Span::styled(
-                    "🤖 Assistant",
+                    "  Assistant",
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
@@ -1773,7 +1750,6 @@ fn render_chat_history_inner(
         }
     }
 
-    // Render scrollbar
     render_scrollbar(
         f,
         total_height,
@@ -1817,7 +1793,7 @@ fn render_chat_input(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let input_block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" 💭 Type your message ")
+        .title(" 󱆿 Type your message ")
         .title_style(
             Style::default()
                 .fg(Color::Blue)
@@ -1832,7 +1808,6 @@ fn render_chat_input(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     f.render_widget(input_block.clone(), area);
 
     let input_inner = input_block.inner(area);
-
     let input_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
@@ -1845,19 +1820,18 @@ fn render_chat_input(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     };
 
     if ollama_state.is_sending {
-        let input = Paragraph::new("🤖 Generating response...")
+        let input = Paragraph::new(" Generating response...")
             .style(input_style)
             .wrap(Wrap { trim: false });
         f.render_widget(input, input_layout[0]);
     } else if ollama_state.input_buffer.is_empty() {
-        let input = Paragraph::new("💭 Type your message here...")
+        let input = Paragraph::new(" Type your message here...")
             .style(input_style)
             .wrap(Wrap { trim: false });
         f.render_widget(input, input_layout[0]);
     } else {
         // Preserve spaces and add cursor - use a non-breaking approach
         use ratatui::text::{Line, Span, Text};
-
         let mut text_spans = Vec::new();
 
         // Process each character individually to prevent space collapsing
@@ -1886,7 +1860,7 @@ fn render_chat_input(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     // Show current snippet info if available
     if let Some(snippet) = &ollama_state.current_snippet {
         if !snippet.is_empty() {
-            let snippet_text = format!("📄 Snippet: {} lines", snippet.lines().count());
+            let snippet_text = format!("󰎚 Snippet: {} lines", snippet.lines().count());
             let snippet_info = Paragraph::new(snippet_text)
                 .style(
                     Style::default()
@@ -1902,7 +1876,7 @@ fn render_chat_input(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
 
 fn render_chat_footer(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let shortcuts = if ollama_state.is_sending {
-        "🔄 Generating... • ↑↓: Scroll • Tab: Switch panels • Esc: Cancel"
+        " Generating... • ↑↓: Scroll • Tab: Switch panels • Esc: Cancel"
     } else {
         "↑↓: Scroll • PgUp/PgDn: Fast scroll • Tab: Switch panels • Ctrl+L: Clear • Enter: Send"
     };
@@ -2182,9 +2156,9 @@ impl ChatStorage {
 
                 for msg in &session.conversation {
                     let role = match msg.role {
-                        ChatRole::User => "🧑 **User**",
-                        ChatRole::Assistant => "🤖 **Assistant**",
-                        ChatRole::System => "⚙️ **System**",
+                        ChatRole::User => " **User**",
+                        ChatRole::Assistant => "  **Assistant**",
+                        ChatRole::System => " **System**",
                     };
                     output.push_str(&format!("{}\n\n{}\n\n---\n\n", role, msg.content));
                 }
