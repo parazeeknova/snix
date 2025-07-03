@@ -158,35 +158,109 @@ impl OllamaHandler {
             }
 
             if let Some(ollama_state) = &mut app.ollama_state {
-                ollama_state.conversation.clear();
-                ollama_state.scroll_position = 0;
+                // Generate snippet hash to check for existing sessions
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+
+                let mut hasher = DefaultHasher::new();
+                snippet.content.hash(&mut hasher);
+                let snippet_hash = format!("{:x}", hasher.finish());
+
+                // Check for existing sessions with this snippet
+                let mut existing_sessions: Vec<_> = ollama_state
+                    .saved_sessions
+                    .iter()
+                    .filter(|session| session.snippet_hash.as_ref() == Some(&snippet_hash))
+                    .collect();
+
+                // Sort by updated_at (most recent first)
+                existing_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+                // Set current snippet for context
                 ollama_state.current_snippet = Some(snippet.content.clone());
 
-                // Create enhanced system prompt with snippet context
-                let enhanced_system_prompt = ollama::create_snippet_system_prompt(
-                    &snippet.language.to_string(),
-                    &snippet.title,
-                    &snippet.content,
-                );
+                if let Some(most_recent_session) = existing_sessions.first() {
+                    let session_to_load = (*most_recent_session).clone();
 
-                ollama_state.system_prompt = enhanced_system_prompt;
+                    ollama_state.conversation = session_to_load.conversation.clone();
+                    ollama_state.current_session = Some(session_to_load.clone());
+                    ollama_state.system_prompt = session_to_load.system_prompt.clone();
+                    ollama_state.system_prompt_buffer = session_to_load.system_prompt.clone();
+                    ollama_state.unsaved_changes = false;
+
+                    // Set the last assistant response for copy functionality
+                    ollama_state.last_assistant_response = ollama_state
+                        .conversation
+                        .iter()
+                        .rev()
+                        .find(|msg| msg.role == crate::ui::ollama::ChatRole::Assistant)
+                        .map(|msg| msg.content.clone());
+
+                    // Switch to chat panel and scroll to bottom
+                    ollama_state.active_panel = crate::ui::ollama::ActivePanel::CurrentChat;
+                    ollama_state.scroll_position = usize::MAX;
+
+                    ollama_state.add_success_toast(format!(
+                        "Loaded existing chat: {} ({} messages)",
+                        session_to_load.title,
+                        session_to_load.get_message_count()
+                    ));
+                } else {
+                    // No existing sessions - create new chat
+                    ollama_state.conversation.clear();
+                    ollama_state.scroll_position = 0;
+                    ollama_state.unsaved_changes = false;
+                    ollama_state.last_assistant_response = None;
+
+                    // Create enhanced system prompt with snippet context
+                    let enhanced_system_prompt = ollama::create_snippet_system_prompt(
+                        &snippet.language.to_string(),
+                        &snippet.title,
+                        &snippet.content,
+                    );
+
+                    ollama_state.system_prompt = enhanced_system_prompt;
+
+                    let snippet_info = format!(
+                        " Working with {} snippet: '{}'",
+                        snippet.language.to_string(),
+                        snippet.title
+                    );
+                    ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
+
+                    ollama_state.add_success_toast(format!(
+                        "Started new chat for snippet: {}",
+                        snippet.title
+                    ));
+                }
+
+                // Common setup for both new and existing chats
                 ollama_state.show_popup = true;
-                ollama_state.models.clear();
                 ollama_state.loading_models = true;
                 ollama_state.error_message = None;
 
-                let snippet_info = format!(
-                    " Working with {} snippet: '{}'",
-                    snippet.language.to_string(),
-                    snippet.title
-                );
-                ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
+                // Clear models and reload them (but don't clear sessions)
+                ollama_state.models.clear();
+                ollama_state.selected_model_index = 0;
 
                 if let Err(e) = ollama::fetch_ollama_models(app) {
-                    app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
+                    if let Some(ollama_state) = &mut app.ollama_state {
+                        ollama_state
+                            .add_error_toast(format!("Failed to fetch Ollama models: {}", e));
+                    }
+                } else {
+                    // Ensure sessions are always refreshed after model loading
+                    if let Some(ollama_state) = &mut app.ollama_state {
+                        if let Some(storage) = &ollama_state.chat_storage {
+                            if let Ok(sessions) = storage.load_all_sessions() {
+                                ollama_state.saved_sessions = sessions;
+                            }
+                        }
+                    }
+                    return true;
                 }
-                return true;
             }
+            return true;
         }
         app.set_error_message("Select a snippet first".to_string());
         false
@@ -1744,44 +1818,7 @@ fn handle_notebook_details_keys(key: KeyEvent, app: &mut App, notebook_id: uuid:
         // Open snippet in Ollama chat
         KeyCode::Char('l') => {
             if let Some(TreeItem::Snippet(snippet_id, _)) = app.get_selected_item() {
-                if let Some(snippet) = app.snippet_database.snippets.get(snippet_id) {
-                    // Initialize Ollama state if needed
-                    if app.ollama_state.is_none() {
-                        app.ollama_state = Some(crate::ui::ollama::OllamaState::new());
-                    }
-
-                    if let Some(ollama_state) = &mut app.ollama_state {
-                        ollama_state.conversation.clear();
-                        ollama_state.scroll_position = 0;
-                        ollama_state.current_snippet = Some(snippet.content.clone());
-
-                        // Create enhanced system prompt with snippet context
-                        let enhanced_system_prompt =
-                            crate::handlers::ollama::create_snippet_system_prompt(
-                                &snippet.language.to_string(),
-                                &snippet.title,
-                                &snippet.content,
-                            );
-
-                        ollama_state.system_prompt = enhanced_system_prompt.clone();
-
-                        ollama_state.show_popup = true;
-                        ollama_state.models.clear();
-                        ollama_state.loading_models = true;
-                        ollama_state.error_message = None;
-
-                        let snippet_info = format!(
-                            " Working with {} snippet: '{}'",
-                            snippet.language.to_string(),
-                            snippet.title
-                        );
-                        ollama_state.add_message(crate::ui::ollama::ChatRole::System, snippet_info);
-
-                        if let Err(e) = ollama::fetch_ollama_models(app) {
-                            app.set_error_message(format!("Failed to fetch Ollama models: {}", e));
-                        }
-                    }
-                }
+                OllamaHandler::open_snippet_chat(app, *snippet_id);
             } else {
                 app.set_error_message("Select a snippet first".to_string());
             }

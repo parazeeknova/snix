@@ -540,14 +540,14 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                         ollama_state.unsaved_changes = false;
                     }
                     ollama_state.show_save_prompt = false;
-                    // Exit Ollama interface
-                    app.ollama_state = None;
+                    // Hide Ollama interface but preserve state
+                    ollama_state.show_popup = false;
                     return Ok(());
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => {
                     ollama_state.show_save_prompt = false;
-                    // Exit without saving
-                    app.ollama_state = None;
+                    // Hide without saving but preserve state
+                    ollama_state.show_popup = false;
                     return Ok(());
                 }
                 KeyCode::Esc => {
@@ -567,14 +567,19 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     ollama_state.system_prompt_buffer.clear();
                 } else {
                     // Check for unsaved changes before exiting
-                    if ollama_state.has_unsaved_session()
-                        || (!ollama_state.conversation.is_empty()
-                            && ollama_state.current_session.is_none())
-                    {
+                    let has_actual_unsaved_changes = ollama_state.has_unsaved_session();
+                    let has_unsaved_conversation = !ollama_state.conversation.is_empty()
+                        && ollama_state.current_session.is_none()
+                        && ollama_state
+                            .conversation
+                            .iter()
+                            .any(|msg| msg.role == ChatRole::User);
+
+                    if has_actual_unsaved_changes || has_unsaved_conversation {
                         ollama_state.show_save_prompt = true;
                     } else {
-                        // Exit Ollama interface directly if no unsaved changes
-                        app.ollama_state = None;
+                        // Hide Ollama interface but preserve state for associated chats
+                        ollama_state.show_popup = false;
                     }
                 }
             }
