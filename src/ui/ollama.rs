@@ -274,6 +274,11 @@ pub struct OllamaState {
     // Save prompt state
     pub show_save_prompt: bool,
     pub unsaved_changes: bool,
+
+    // Copy functionality state
+    pub last_assistant_response: Option<String>,
+    pub copy_button_pressed: bool,
+    pub copy_button_pressed_at: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -369,6 +374,11 @@ impl Default for OllamaState {
             // Save prompt state
             show_save_prompt: false,
             unsaved_changes: false,
+
+            // Copy functionality state
+            last_assistant_response: None,
+            copy_button_pressed: false,
+            copy_button_pressed_at: None,
         }
     }
 }
@@ -390,6 +400,11 @@ impl OllamaState {
     }
 
     pub fn add_message(&mut self, role: ChatRole, content: String) {
+        // Track last assistant response for copy functionality
+        if role == ChatRole::Assistant {
+            self.last_assistant_response = Some(content.clone());
+        }
+
         self.conversation.push(ChatMessage {
             role,
             content,
@@ -498,6 +513,8 @@ impl OllamaState {
         self.current_session = Some(new_session);
         self.scroll_position = 0;
         self.unsaved_changes = false;
+        // Clear copy functionality state
+        self.last_assistant_response = None;
 
         // Switch to chat panel
         self.active_panel = ActivePanel::CurrentChat;
@@ -534,6 +551,49 @@ impl OllamaState {
                         .collect()
                 } else {
                     Vec::new()
+                }
+            }
+        }
+    }
+
+    /// Copy the last assistant response to clipboard
+    pub fn copy_last_response(&mut self) -> bool {
+        if let Some(response) = &self.last_assistant_response {
+            use std::io::Write;
+            use std::process::{Command, Stdio};
+
+            let commands = [
+                ("xclip", vec!["-selection", "clipboard"]),
+                ("wl-copy", vec![]),
+                ("termux-clipboard-set", vec![]),
+            ];
+
+            for (cmd, args) in &commands {
+                if let Ok(mut process) = Command::new(cmd).args(args).stdin(Stdio::piped()).spawn()
+                {
+                    if let Some(stdin) = process.stdin.as_mut() {
+                        if stdin.write_all(response.as_bytes()).is_ok() {
+                            // Set visual feedback state with timestamp
+                            self.copy_button_pressed = true;
+                            self.copy_button_pressed_at = Some(std::time::Instant::now());
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        } else {
+            false
+        }
+    }
+
+    /// Reset copy button visual feedback after timeout
+    pub fn update_copy_button_feedback(&mut self) {
+        if self.copy_button_pressed {
+            if let Some(pressed_at) = self.copy_button_pressed_at {
+                if pressed_at.elapsed().as_secs() >= 2 {
+                    self.copy_button_pressed = false;
+                    self.copy_button_pressed_at = None;
                 }
             }
         }
@@ -1507,11 +1567,53 @@ fn render_chat_header(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
         .title(" Current Chat ");
 
     let header_text = Paragraph::new(header_content)
-        .block(header_block)
+        .block(header_block.clone())
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
 
-    f.render_widget(header_text, area);
+    let header_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(20), Constraint::Length(16)])
+        .split(area);
+
+    f.render_widget(header_text, header_layout[0]);
+
+    let copy_button_available =
+        ollama_state.last_assistant_response.is_some() && !ollama_state.is_sending;
+    let copy_button_style = if copy_button_available {
+        if ollama_state.copy_button_pressed {
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD)
+        }
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let copy_button_text = if ollama_state.copy_button_pressed {
+        " Copied!"
+    } else if copy_button_available {
+        " Copy"
+    } else {
+        "󰷆 No response"
+    };
+
+    let copy_button = Paragraph::new(copy_button_text)
+        .style(copy_button_style)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .border_style(copy_button_style)
+                .title(" Ctrl+C "),
+        );
+
+    f.render_widget(copy_button, header_layout[1]);
 }
 
 fn render_chat_history(
@@ -1876,9 +1978,17 @@ fn render_chat_input(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
 
 fn render_chat_footer(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     let shortcuts = if ollama_state.is_sending {
-        " Generating... • ↑↓: Scroll • Tab: Switch panels • Esc: Cancel"
+        " Generating... • ↑↓: Scroll • Tab: Switch panels • Esc: Cancel".to_string()
     } else {
-        "↑↓: Scroll • PgUp/PgDn: Fast scroll • Tab: Switch panels • Ctrl+L: Clear • Enter: Send"
+        let copy_hint = if ollama_state.last_assistant_response.is_some() {
+            " • Ctrl+C: Copy response"
+        } else {
+            ""
+        };
+        format!(
+            "↑↓: Scroll • PgUp/PgDn: Fast scroll • Tab: Switch panels • Ctrl+L: Clear{} • Enter: Send",
+            copy_hint
+        )
     };
 
     let footer = Paragraph::new(shortcuts)

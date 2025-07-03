@@ -292,6 +292,7 @@ pub fn update_loading_animation(app: &mut App) {
         }
 
         ollama_state.clean_expired_toasts();
+        ollama_state.update_copy_button_feedback();
     }
 }
 
@@ -386,11 +387,14 @@ pub fn process_ollama_messages(app: &mut App) {
                             let metrics = ollama_state.finish_message_timing();
                             let context_length = ollama_state.conversation.len() as u32;
 
-                            // Update the last assistant message with final metrics
+                            // Update the last assistant message with final metrics and track for copying
                             if let Some(last_msg) = ollama_state.conversation.last_mut() {
                                 if last_msg.role == ChatRole::Assistant {
                                     last_msg.metrics = metrics.clone();
                                     last_msg.context_length = context_length;
+                                    // Track the complete response for copy functionality
+                                    ollama_state.last_assistant_response =
+                                        Some(last_msg.content.clone());
                                 }
                             }
 
@@ -809,6 +813,18 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     }
                 }
             }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Copy last assistant response to clipboard
+                if ollama_state.copy_last_response() {
+                    ollama_state.add_success_toast("Response copied to clipboard! ".to_string());
+                } else if ollama_state.last_assistant_response.is_none() {
+                    ollama_state.add_info_toast("No response to copy yet".to_string());
+                } else {
+                    ollama_state.add_error_toast(
+                        "Failed to copy to clipboard (clipboard tools required)".to_string(),
+                    );
+                }
+            }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if ollama_state.active_panel == ActivePanel::CurrentChat {
                     ollama_state.models.clear();
@@ -993,6 +1009,14 @@ fn load_selected_session(ollama_state: &mut OllamaState) -> Result<()> {
             // Reset unsaved changes flag since we just loaded a saved session
             ollama_state.unsaved_changes = false;
 
+            // Set the last assistant response for copy functionality
+            ollama_state.last_assistant_response = ollama_state
+                .conversation
+                .iter()
+                .rev()
+                .find(|msg| msg.role == crate::ui::ollama::ChatRole::Assistant)
+                .map(|msg| msg.content.clone());
+
             // Switch to chat panel
             ollama_state.active_panel = ActivePanel::CurrentChat;
 
@@ -1057,6 +1081,7 @@ fn delete_selected_session(ollama_state: &mut OllamaState) -> Result<()> {
 fn clear_conversation(ollama_state: &mut OllamaState) -> Result<()> {
     ollama_state.conversation.clear();
     ollama_state.scroll_position = 0;
+    ollama_state.last_assistant_response = None; // Clear copy functionality state
 
     if let Some(session) = &mut ollama_state.current_session {
         session.conversation.clear();
