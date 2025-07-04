@@ -1,16 +1,17 @@
 use crate::app::App;
 use chrono::{DateTime, Utc};
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use once_cell::sync::Lazy;
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    Frame,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
-use unicode_width::UnicodeWidthChar;
+use std::{panic, time::Instant};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,6 +385,20 @@ impl Default for OllamaState {
 }
 
 impl OllamaState {
+    /// Safely scroll to the bottom of the chat
+    pub fn scroll_to_bottom(&mut self) {
+        // Calculate a reasonable max scroll position instead of using a huge number
+        let max_scroll = if self.conversation.is_empty() {
+            0
+        } else {
+            // Conservative estimate: each message takes about 8 lines including borders
+            let estimated_total_height = self.conversation.len() * 8;
+            let estimated_visible_height = 12;
+            estimated_total_height.saturating_sub(estimated_visible_height)
+        };
+        self.scroll_position = max_scroll;
+    }
+
     pub fn new() -> Self {
         let mut state = Self::default();
 
@@ -413,7 +428,7 @@ impl OllamaState {
         });
         // Auto-scroll to the bottom when a new message is added
         // Use usize::MAX which will be safely clamped in render
-        self.scroll_position = usize::MAX;
+        self.scroll_to_bottom();
     }
 
     pub fn get_selected_model(&self) -> Option<&String> {
@@ -1682,9 +1697,14 @@ fn render_chat_history_inner(
         })
         .collect();
 
-    // Safely adjust scroll position
-    let max_scroll = total_height.saturating_sub(chat_inner.height as usize);
-    let scroll = ollama_state.scroll_position.min(max_scroll);
+    // Safely adjust scroll position with reasonable bounds
+    let visible_height = chat_inner.height as usize;
+    let max_scroll = if total_height > visible_height {
+        total_height - visible_height
+    } else {
+        0
+    };
+    let scroll = ollama_state.scroll_position.min(max_scroll).min(10000); // Cap at reasonable max
 
     // Calculate which messages to display based on scroll position with bounds checking
     let mut current_height = 0;
@@ -1695,7 +1715,9 @@ fn render_chat_history_inner(
     for (idx, &height) in message_heights.iter().enumerate().take(safe_len) {
         if current_height + height > scroll {
             start_idx = idx;
-            start_offset = scroll - current_height;
+            start_offset = scroll
+                .saturating_sub(current_height)
+                .min(height.saturating_sub(1));
             break;
         }
         current_height += height + 1;
@@ -1723,7 +1745,11 @@ fn render_chat_history_inner(
             // Skip if message doesn't exist
             continue;
         };
-        let first_line_offset = if idx == start_idx { start_offset } else { 0 };
+        let first_line_offset = if idx == start_idx {
+            start_offset.min(100) // Cap at reasonable line offset
+        } else {
+            0
+        };
 
         // Determine message style based on role and create title with metrics
         let (_role_text, style, _icon, title_text) = match msg.role {
@@ -1787,7 +1813,7 @@ fn render_chat_history_inner(
         let msg_height = message_heights.get(idx).copied().unwrap_or(5);
         let visible_height = msg_height
             .saturating_sub(first_line_offset)
-            .min(chat_inner.height as usize - y_offset);
+            .min((chat_inner.height as usize).saturating_sub(y_offset));
 
         if visible_height == 0 {
             continue;
@@ -1795,36 +1821,43 @@ fn render_chat_history_inner(
 
         let msg_area = Rect::new(
             chat_inner.x,
-            chat_inner.y + y_offset as u16,
+            chat_inner.y + (y_offset.min(u16::MAX as usize) as u16),
             chat_inner.width,
-            visible_height as u16,
+            visible_height.min(u16::MAX as usize) as u16,
         );
 
         f.render_widget(msg_block.clone(), msg_area);
 
         // Render message content
         let inner_msg_area = msg_block.inner(msg_area);
-        if !inner_msg_area.is_empty() {
-            let text = render_markdown(&msg.content, inner_msg_area.width as usize);
+        if !inner_msg_area.is_empty() && inner_msg_area.width > 0 && !msg.content.trim().is_empty()
+        {
+            // Ensure minimum width and valid content before rendering
+            let render_width = (inner_msg_area.width as usize).max(10);
+            let text = render_markdown(&msg.content, render_width);
             let paragraph = Paragraph::new(text)
-                .wrap(Wrap { trim: true })
-                .scroll((first_line_offset as u16, 0));
+                .wrap(Wrap { trim: false }) // Don't trim to preserve indentation
+                .scroll((first_line_offset.min(u16::MAX as usize) as u16, 0));
 
             f.render_widget(paragraph, inner_msg_area);
         }
 
         y_offset += visible_height + 1;
+        // Prevent y_offset from growing too large
+        if y_offset > u16::MAX as usize {
+            break;
+        }
     }
 
     // Show typing indicator
     if ollama_state.is_sending && !ollama_state.typing_indicator.is_empty() {
-        let remaining_height = chat_inner.height as usize - y_offset;
+        let remaining_height = (chat_inner.height as usize).saturating_sub(y_offset);
         if remaining_height > 2 {
             let typing_area = Rect::new(
                 chat_inner.x,
-                chat_inner.y + y_offset as u16,
+                chat_inner.y + (y_offset.min(u16::MAX as usize) as u16),
                 chat_inner.width,
-                3.min(remaining_height) as u16,
+                3.min(remaining_height).min(u16::MAX as usize) as u16,
             );
 
             let typing_block = Block::default()
@@ -1873,11 +1906,15 @@ fn render_scrollbar(
     }
 
     let scrollbar_height = area.height as usize;
+    if total_height == 0 || scrollbar_height == 0 {
+        return;
+    }
     let thumb_size = ((visible_height * scrollbar_height) / total_height).max(1);
     let thumb_position = (scroll_position * scrollbar_height) / total_height;
 
-    // Draw scrollbar track
-    for y in 0..scrollbar_height {
+    // Draw scrollbar track (limit to reasonable height to prevent overflow)
+    let safe_scrollbar_height = scrollbar_height.min(u16::MAX as usize);
+    for y in 0..safe_scrollbar_height {
         let style = if y >= thumb_position && y < (thumb_position + thumb_size) {
             Style::default().bg(Color::Cyan).fg(Color::White)
         } else {
@@ -1886,7 +1923,7 @@ fn render_scrollbar(
 
         f.render_widget(
             Block::default().style(style),
-            Rect::new(area.x, area.y + y as u16, 1, 1),
+            Rect::new(area.x, area.y + (y.min(u16::MAX as usize) as u16), 1, 1),
         );
     }
 }
@@ -1997,16 +2034,195 @@ fn render_chat_footer(f: &mut Frame, ollama_state: &OllamaState, area: Rect) {
     f.render_widget(footer, area);
 }
 
-// Convert markdown to styled text for ratatui
-fn render_markdown(markdown: &str, _width: usize) -> Text {
+// Preprocess plain text to add intelligent formatting
+fn preprocess_plain_text_for_formatting(text: &str) -> String {
+    // Safety check for empty or very short text
+    if text.trim().len() < 10 {
+        return text.to_string();
+    }
+
+    let mut result = String::new();
+    let lines: Vec<&str> = text.lines().collect();
+
+    // If it's already formatted (has multiple lines with proper structure), return as-is
+    if lines.len() > 3 && lines.iter().any(|line| line.trim().is_empty()) {
+        return text.to_string();
+    }
+
+    // Join lines into sentences and process as single block of text
+    let full_text = if lines.len() == 1 {
+        // Single paragraph - the typical LLM output problem
+        text.to_string()
+    } else {
+        // Multiple lines but likely no structure - join them
+        lines.join(" ")
+    };
+
+    // Safety check after joining
+    if full_text.trim().len() < 10 {
+        return text.to_string();
+    }
+
+    let sentences: Vec<&str> = full_text
+        .split(". ")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && s.len() > 2)
+        .collect();
+
+    // If no valid sentences found, return original
+    if sentences.is_empty() {
+        return text.to_string();
+    }
+
+    let mut current_paragraph = String::new();
+
+    for (i, sentence) in sentences.iter().enumerate() {
+        // Safety check for sentence content
+        if sentence.trim().is_empty() {
+            continue;
+        }
+
+        let sentence = if i == sentences.len() - 1 {
+            // Last sentence - don't add period if it already ends with punctuation
+            let sentence_str = sentence.to_string();
+            if sentence_str.ends_with('.')
+                || sentence_str.ends_with('!')
+                || sentence_str.ends_with('?')
+                || sentence_str.ends_with(':')
+                || sentence_str.ends_with(';')
+            {
+                sentence_str
+            } else {
+                format!("{}.", sentence)
+            }
+        } else {
+            format!("{}.", sentence)
+        };
+
+        // Detect code patterns and wrap them - with safety checks
+        let processed_sentence = if sentence.len() > 10 {
+            if sentence.contains("function") && sentence.contains("(") && sentence.contains(")") {
+                // Function definitions
+                format!("\n\n```\n{}\n```\n\n", sentence.trim())
+            } else if sentence.contains("algorithm") && sentence.len() > 100 {
+                // Algorithm descriptions - treat as code if long enough
+                format!("\n\n```\n{}\n```\n\n", sentence.trim())
+            } else if sentence.contains("=") && sentence.contains("(") && sentence.contains(")") {
+                // Assignment with function calls
+                format!("\n\n```\n{}\n```\n\n", sentence.trim())
+            } else if sentence.to_lowercase().contains("step") && sentence.contains(":") {
+                // Process steps - format as list items
+                format!("\n- {}", sentence.trim())
+            } else if sentence.len() > 6
+                && (sentence.to_lowercase().starts_with("input:")
+                    || sentence.to_lowercase().starts_with("output:")
+                    || sentence.to_lowercase().starts_with("example:"))
+            {
+                // Input/Output examples
+                format!("\n\n**{}**", sentence.trim())
+            } else {
+                sentence.clone()
+            }
+        } else {
+            sentence.clone()
+        };
+
+        // Handle paragraph breaks
+        if processed_sentence.starts_with('\n') {
+            // Code block or special formatting - add to result directly
+            if !current_paragraph.trim().is_empty() {
+                result.push_str(&current_paragraph);
+                result.push_str("\n\n");
+                current_paragraph.clear();
+            }
+            result.push_str(&processed_sentence);
+        } else {
+            // Regular sentence - add to current paragraph
+            if !current_paragraph.is_empty() {
+                current_paragraph.push(' ');
+            }
+            current_paragraph.push_str(&processed_sentence);
+
+            // Create paragraph breaks at logical points - with safety checks
+            if current_paragraph.len() > 200 {
+                let sentence_lower = sentence.to_lowercase();
+                if sentence_lower.contains("however")
+                    || sentence_lower.contains("therefore")
+                    || sentence_lower.contains("in conclusion")
+                    || sentence_lower.contains("furthermore")
+                    || sentence_lower.contains("moreover")
+                {
+                    result.push_str(&current_paragraph);
+                    result.push_str("\n\n");
+                    current_paragraph.clear();
+                }
+            }
+        }
+    }
+
+    // Add any remaining paragraph content
+    if !current_paragraph.trim().is_empty() {
+        result.push_str(&current_paragraph);
+    }
+
+    // Clean up extra whitespace
+    let result = result.replace("\n\n\n", "\n\n");
+
+    // Final safety check - if result is empty or too short, return original
+    if result.trim().len() < 5 {
+        text.to_string()
+    } else {
+        result.trim().to_string()
+    }
+}
+
+// Enhanced markdown rendering with syntax highlighting and better formatting
+fn render_markdown(markdown: &str, width: usize) -> Text {
+    use syntect::{highlighting::ThemeSet, parsing::SyntaxSet};
+
+    static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| SyntaxSet::load_defaults_newlines());
+    static THEME_SET: Lazy<ThemeSet> = Lazy::new(|| ThemeSet::load_defaults());
+
+    // Safety checks - return basic text if inputs are invalid
+    if markdown.trim().is_empty() || width == 0 {
+        return Text::from(markdown);
+    }
+
+    let safe_width = width.max(10).min(1000); // Ensure reasonable width bounds
+
+    // Preprocess plain text to add intelligent formatting - with error handling
+    let processed_markdown = match panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        preprocess_plain_text_for_formatting(markdown)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            // If preprocessing panics, just return the original text
+            markdown.to_string()
+        }
+    };
+
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
-    let parser = Parser::new_ext(markdown, options);
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_FOOTNOTES);
+    options.insert(Options::ENABLE_TASKLISTS);
+
+    let parser = Parser::new_ext(&processed_markdown, options);
 
     let mut text = Text::default();
     let mut current_line = Line::default();
-    let mut current_style = Style::default();
-    let mut code_block = false;
+    let mut current_style = Style::default().fg(Color::White);
+    let mut in_code_block = false;
+    let mut code_block_language: Option<String> = None;
+    let mut code_block_content = String::new();
+    let mut list_depth: usize = 0;
+    let mut in_blockquote = false;
+
+    // Get the "base16-ocean.dark" theme for syntax highlighting
+    let theme = THEME_SET
+        .themes
+        .get("base16-ocean.dark")
+        .unwrap_or_else(|| THEME_SET.themes.values().next().unwrap());
 
     for event in parser {
         match event {
@@ -2014,6 +2230,13 @@ fn render_markdown(markdown: &str, _width: usize) -> Text {
                 if !current_line.spans.is_empty() {
                     text.lines.push(current_line);
                     current_line = Line::default();
+                }
+
+                // Add blockquote prefix if we're in a blockquote
+                if in_blockquote {
+                    current_line
+                        .spans
+                        .push(Span::styled("▌ ", Style::default().fg(Color::DarkGray)));
                 }
             }
             Event::End(TagEnd::Paragraph) => {
@@ -2024,14 +2247,31 @@ fn render_markdown(markdown: &str, _width: usize) -> Text {
                 text.lines.push(Line::default());
             }
             Event::Start(Tag::Heading { level, .. }) => {
-                let level_style = match level {
-                    HeadingLevel::H1 => Style::default()
-                        .fg(Color::LightCyan)
-                        .add_modifier(Modifier::BOLD),
-                    HeadingLevel::H2 => Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                    _ => Style::default().add_modifier(Modifier::BOLD),
+                let (level_style, prefix) = match level {
+                    HeadingLevel::H1 => (
+                        Style::default()
+                            .fg(Color::LightCyan)
+                            .add_modifier(Modifier::BOLD),
+                        "# ",
+                    ),
+                    HeadingLevel::H2 => (
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                        "## ",
+                    ),
+                    HeadingLevel::H3 => (
+                        Style::default()
+                            .fg(Color::LightBlue)
+                            .add_modifier(Modifier::BOLD),
+                        "### ",
+                    ),
+                    _ => (
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD),
+                        "#### ",
+                    ),
                 };
                 current_style = level_style;
 
@@ -2039,36 +2279,154 @@ fn render_markdown(markdown: &str, _width: usize) -> Text {
                     text.lines.push(current_line);
                     current_line = Line::default();
                 }
+
+                current_line.spans.push(Span::styled(prefix, level_style));
             }
             Event::End(TagEnd::Heading(_)) => {
                 if !current_line.spans.is_empty() {
                     text.lines.push(current_line);
                     current_line = Line::default();
                 }
-                current_style = Style::default();
+                current_style = Style::default().fg(Color::White);
                 text.lines.push(Line::default());
             }
-            Event::Start(Tag::CodeBlock(_)) => {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(lang))) => {
                 if !current_line.spans.is_empty() {
                     text.lines.push(current_line);
                     current_line = Line::default();
                 }
-                code_block = true;
-                text.lines.push(Line::from(vec![Span::styled(
-                    "```",
-                    Style::default().fg(Color::DarkGray),
-                )]));
+
+                in_code_block = true;
+                code_block_language = if lang.is_empty() {
+                    None
+                } else {
+                    Some(lang.to_string())
+                };
+                code_block_content.clear();
+
+                // Add code block header with language indicator
+                let lang_display = code_block_language.as_deref().unwrap_or("text");
+                let header_line = Line::from(vec![
+                    Span::styled("┌─ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("", Style::default().fg(Color::LightGreen)),
+                    Span::styled(
+                        format!(" {} ", lang_display.to_uppercase()),
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::LightGreen)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ", Style::default()),
+                ]);
+                text.lines.push(header_line);
+            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+
+                in_code_block = true;
+                code_block_language = None;
+                code_block_content.clear();
+
+                // Add simple code block header
+                let header_line = Line::from(vec![
+                    Span::styled("┌─ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        " CODE ",
+                        Style::default()
+                            .fg(Color::White)
+                            .bg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ", Style::default()),
+                ]);
+                text.lines.push(header_line);
             }
             Event::End(TagEnd::CodeBlock) => {
+                if in_code_block {
+                    // Apply syntax highlighting to the collected code block content
+                    if let Some(ref lang) = code_block_language {
+                        if let Some(syntax) = SYNTAX_SET.find_syntax_by_token(lang) {
+                            render_highlighted_code_block(
+                                &mut text,
+                                &code_block_content,
+                                syntax,
+                                theme,
+                                &SYNTAX_SET,
+                            );
+                        } else {
+                            // Fallback to plain text with basic styling
+                            render_plain_code_block(&mut text, &code_block_content);
+                        }
+                    } else {
+                        // Plain code block
+                        render_plain_code_block(&mut text, &code_block_content);
+                    }
+
+                    // Add code block footer
+                    let footer_width = if safe_width > 2 { safe_width - 2 } else { 0 };
+                    let footer_line = Line::from(vec![
+                        Span::styled("└─", Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            "─".repeat(footer_width),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]);
+                    text.lines.push(footer_line);
+                    text.lines.push(Line::default());
+
+                    in_code_block = false;
+                    code_block_language = None;
+                    code_block_content.clear();
+                }
+            }
+            Event::Start(Tag::List(start_num)) => {
+                list_depth += 1;
+                if start_num.is_some() {
+                    // Ordered list - we'll handle numbering in list items
+                }
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_depth = list_depth.saturating_sub(1);
+                if list_depth == 0 {
+                    text.lines.push(Line::default());
+                }
+            }
+            Event::Start(Tag::Item) => {
                 if !current_line.spans.is_empty() {
                     text.lines.push(current_line);
                     current_line = Line::default();
                 }
-                code_block = false;
-                text.lines.push(Line::from(vec![Span::styled(
-                    "```",
-                    Style::default().fg(Color::DarkGray),
-                )]));
+
+                // Add indentation and bullet point based on depth
+                let indent = "  ".repeat(list_depth.saturating_sub(1));
+                current_line.spans.push(Span::styled(
+                    format!("{}• ", indent),
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+            Event::End(TagEnd::Item) => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                in_blockquote = true;
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                in_blockquote = false;
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
                 text.lines.push(Line::default());
             }
             Event::Start(Tag::Emphasis) => {
@@ -2083,41 +2441,123 @@ fn render_markdown(markdown: &str, _width: usize) -> Text {
             Event::End(TagEnd::Strong) => {
                 current_style = current_style.remove_modifier(Modifier::BOLD);
             }
+            Event::Start(Tag::Strikethrough) => {
+                current_style = current_style.add_modifier(Modifier::CROSSED_OUT);
+            }
+            Event::End(TagEnd::Strikethrough) => {
+                current_style = current_style.remove_modifier(Modifier::CROSSED_OUT);
+            }
             Event::Code(text_str) => {
                 current_line.spans.push(Span::styled(
                     format!("`{}`", text_str),
-                    Style::default().fg(Color::LightMagenta),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::LightMagenta)
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
             Event::Text(text_str) => {
-                let style = if code_block {
-                    Style::default().fg(Color::LightYellow)
+                if in_code_block {
+                    // Collect code block content for later syntax highlighting
+                    code_block_content.push_str(&text_str);
                 } else {
-                    current_style
-                };
-
-                let text_content = text_str.to_string();
-                if text_content.contains('\n') {
-                    for (i, line) in text_content.split('\n').enumerate() {
-                        if i > 0 {
-                            if !current_line.spans.is_empty() {
-                                text.lines.push(current_line);
-                                current_line = Line::default();
+                    let text_content = text_str.to_string();
+                    if text_content.contains('\n') {
+                        for (i, line) in text_content.split('\n').enumerate() {
+                            if i > 0 {
+                                if !current_line.spans.is_empty() {
+                                    text.lines.push(current_line);
+                                    current_line = Line::default();
+                                }
+                                // Preserve blockquote prefix on new lines
+                                if in_blockquote {
+                                    current_line.spans.push(Span::styled(
+                                        "▌ ",
+                                        Style::default().fg(Color::DarkGray),
+                                    ));
+                                }
+                            }
+                            if !line.is_empty() {
+                                // Handle word wrapping for each line
+                                let wrapped_lines =
+                                    wrap_text_to_width(line, safe_width, in_blockquote);
+                                for (j, wrapped_line) in wrapped_lines.iter().enumerate() {
+                                    if j > 0 {
+                                        if !current_line.spans.is_empty() {
+                                            text.lines.push(current_line);
+                                            current_line = Line::default();
+                                        }
+                                        // Add blockquote prefix for continuation lines
+                                        if in_blockquote {
+                                            current_line.spans.push(Span::styled(
+                                                "▌ ",
+                                                Style::default().fg(Color::DarkGray),
+                                            ));
+                                        }
+                                    }
+                                    current_line
+                                        .spans
+                                        .push(Span::styled(wrapped_line.clone(), current_style));
+                                }
                             }
                         }
-                        current_line
-                            .spans
-                            .push(Span::styled(line.to_string(), style));
+                    } else {
+                        // Handle word wrapping for single lines
+                        let wrapped_lines =
+                            wrap_text_to_width(&text_content, safe_width, in_blockquote);
+                        for (i, wrapped_line) in wrapped_lines.iter().enumerate() {
+                            if i > 0 {
+                                if !current_line.spans.is_empty() {
+                                    text.lines.push(current_line);
+                                    current_line = Line::default();
+                                }
+                                // Add blockquote prefix for continuation lines
+                                if in_blockquote {
+                                    current_line.spans.push(Span::styled(
+                                        "▌ ",
+                                        Style::default().fg(Color::DarkGray),
+                                    ));
+                                }
+                            }
+                            current_line
+                                .spans
+                                .push(Span::styled(wrapped_line.clone(), current_style));
+                        }
                     }
-                } else {
-                    current_line.spans.push(Span::styled(text_content, style));
                 }
             }
-            Event::SoftBreak | Event::HardBreak => {
+            Event::SoftBreak => {
+                current_line.spans.push(Span::styled(" ", current_style));
+            }
+            Event::HardBreak => {
                 if !current_line.spans.is_empty() {
                     text.lines.push(current_line);
                     current_line = Line::default();
                 }
+                // Preserve blockquote prefix on new lines
+                if in_blockquote {
+                    current_line
+                        .spans
+                        .push(Span::styled("▌ ", Style::default().fg(Color::DarkGray)));
+                }
+            }
+            Event::Rule => {
+                if !current_line.spans.is_empty() {
+                    text.lines.push(current_line);
+                    current_line = Line::default();
+                }
+                // Add horizontal rule
+                let rule_width = if safe_width > 4 {
+                    safe_width - 4
+                } else {
+                    safe_width
+                };
+                let rule_line = Line::from(vec![Span::styled(
+                    "─".repeat(rule_width),
+                    Style::default().fg(Color::DarkGray),
+                )]);
+                text.lines.push(rule_line);
+                text.lines.push(Line::default());
             }
             _ => {}
         }
@@ -2128,6 +2568,121 @@ fn render_markdown(markdown: &str, _width: usize) -> Text {
     }
 
     text
+}
+
+// Helper function to render syntax-highlighted code blocks
+fn render_highlighted_code_block(
+    text: &mut Text,
+    code_content: &str,
+    syntax: &syntect::parsing::SyntaxReference,
+    theme: &syntect::highlighting::Theme,
+    syntax_set: &syntect::parsing::SyntaxSet,
+) {
+    use syntect::easy::HighlightLines;
+    use syntect::util::LinesWithEndings;
+
+    let mut highlighter = HighlightLines::new(syntax, theme);
+
+    for line in LinesWithEndings::from(code_content) {
+        if let Ok(highlighted) = highlighter.highlight_line(line, syntax_set) {
+            let mut spans = vec![Span::styled("│ ", Style::default().fg(Color::DarkGray))];
+
+            for (style, content) in highlighted {
+                let fg_color = convert_syntect_color_to_ratatui(style.foreground);
+                let text_style = if style
+                    .font_style
+                    .contains(syntect::highlighting::FontStyle::BOLD)
+                {
+                    Style::default().fg(fg_color).add_modifier(Modifier::BOLD)
+                } else if style
+                    .font_style
+                    .contains(syntect::highlighting::FontStyle::ITALIC)
+                {
+                    Style::default().fg(fg_color).add_modifier(Modifier::ITALIC)
+                } else {
+                    Style::default().fg(fg_color)
+                };
+
+                spans.push(Span::styled(content.to_string(), text_style));
+            }
+
+            text.lines.push(Line::from(spans));
+        } else {
+            // Fallback for highlighting errors
+            text.lines.push(Line::from(vec![
+                Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(line.to_string(), Style::default().fg(Color::LightYellow)),
+            ]));
+        }
+    }
+}
+
+// Helper function to render plain code blocks
+fn render_plain_code_block(text: &mut Text, code_content: &str) {
+    for line in code_content.lines() {
+        let code_line = Line::from(vec![
+            Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(line.to_string(), Style::default().fg(Color::LightYellow)),
+        ]);
+        text.lines.push(code_line);
+    }
+}
+
+// Helper function to convert syntect colors to ratatui colors
+fn convert_syntect_color_to_ratatui(color: syntect::highlighting::Color) -> Color {
+    Color::Rgb(color.r, color.g, color.b)
+}
+
+// Helper function to intelligently wrap text to a given width
+fn wrap_text_to_width(text: &str, width: usize, in_blockquote: bool) -> Vec<String> {
+    if width == 0 || text.is_empty() {
+        return vec![text.to_string()];
+    }
+
+    // Account for blockquote prefix
+    let effective_width = if in_blockquote {
+        // Account for "▌ " prefix
+        width.saturating_sub(2)
+    } else {
+        width
+    };
+
+    if effective_width == 0 {
+        return vec![text.to_string()];
+    }
+
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut current_width = 0;
+
+    for word in words {
+        let word_width = UnicodeWidthStr::width(word);
+
+        // Check if we need to break the line
+        if current_width + word_width + 1 > effective_width && !current_line.is_empty() {
+            lines.push(current_line);
+            current_line = word.to_string();
+            current_width = word_width;
+        } else {
+            if !current_line.is_empty() {
+                current_line.push(' ');
+                current_width += 1;
+            }
+            current_line.push_str(word);
+            current_width += word_width;
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
 }
 
 fn calculate_wrapped_height(text: &str, width: usize) -> usize {

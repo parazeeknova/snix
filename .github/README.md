@@ -16,6 +16,7 @@ Snix is a extremely fast code snippets & boilerplate manager (soon!) for your te
 
 ## Features
 - **Extremely fast**: Snix is built with performance in mind, ensuring that you can access your snippets quickly.
+- **Ollama Support**: Inbuilt Ollama support, talk to your snippet, using your local llms.
 - **Create and manage notebooks**: Organize your snippets into notebooks for better categorization.
 - **Create and manage snippets**: Add, edit, and delete snippets with ease.
 - **Search snippets**: Quickly find snippets using fuzzy search.
@@ -35,6 +36,14 @@ snix
 ```
 
 <img width="1000" src="./assets/tui.gif" alt="snix tui showcase"/>
+
+<br />
+
+```bash
+Press `l` on any snippet
+```
+
+<img width="1000" src="../tapes/ollama.gif" alt="snix ollama showcase">
 
 <br />
 

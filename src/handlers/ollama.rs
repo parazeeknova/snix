@@ -497,7 +497,7 @@ pub fn process_ollama_messages(app: &mut App) {
                         }
 
                         // Auto-scroll to bottom on any content update
-                        ollama_state.scroll_position = usize::MAX;
+                        ollama_state.scroll_to_bottom();
                     }
                 }
                 OllamaMessage::Error {
@@ -519,7 +519,7 @@ pub fn process_ollama_messages(app: &mut App) {
                         ollama_state.pending_response_id = None;
                         ollama_state.typing_indicator.clear();
                         ollama_state.error_message = Some(message);
-                        ollama_state.scroll_position = usize::MAX;
+                        ollama_state.scroll_to_bottom();
                     }
                 }
             }
@@ -791,7 +791,7 @@ pub fn handle_ollama_input(app: &mut App, key: KeyEvent) -> Result<()> {
             }
             KeyCode::End => {
                 // Scroll to bottom of chat - works from any panel
-                ollama_state.scroll_position = usize::MAX;
+                ollama_state.scroll_to_bottom();
             }
             KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Err(e) = clear_conversation(ollama_state) {
@@ -1026,7 +1026,7 @@ fn load_selected_session(ollama_state: &mut OllamaState) -> Result<()> {
             ollama_state.active_panel = ActivePanel::CurrentChat;
 
             // Scroll to bottom to show the most recent messages
-            ollama_state.scroll_position = usize::MAX;
+            ollama_state.scroll_to_bottom();
             ollama_state.add_success_toast(format!(
                 "Loaded session: {} ({} messages)",
                 selected_session.title,
@@ -1150,56 +1150,62 @@ fn refresh_sessions(ollama_state: &mut OllamaState) -> Result<()> {
 
 /// Safely scroll chat up with bounds checking
 fn scroll_chat_up(ollama_state: &mut OllamaState) {
-    ollama_state.scroll_position = ollama_state
-        .scroll_position
-        .saturating_sub(ollama_state.scroll_speed);
+    let scroll_amount = ollama_state.scroll_speed.max(1);
+    ollama_state.scroll_position = ollama_state.scroll_position.saturating_sub(scroll_amount);
 }
 
 /// Safely scroll chat down with overflow protection
 fn scroll_chat_down(ollama_state: &mut OllamaState) {
     // Calculate maximum scroll position based on content
     let max_scroll = calculate_max_scroll_position(ollama_state);
+    let scroll_amount = ollama_state.scroll_speed.max(1);
 
-    // Only scroll if we haven't reached the bottom
-    if ollama_state.scroll_position < max_scroll {
-        ollama_state.scroll_position =
-            (ollama_state.scroll_position + ollama_state.scroll_speed).min(max_scroll);
-    }
+    // Always allow scrolling up to the max position, but cap at reasonable limit
+    ollama_state.scroll_position = (ollama_state.scroll_position + scroll_amount)
+        .min(max_scroll)
+        .min(2000);
 }
 
 /// Safely fast scroll chat up
 fn fast_scroll_chat_up(ollama_state: &mut OllamaState) {
+    let fast_scroll_amount = (ollama_state.scroll_speed * 5).max(5);
     ollama_state.scroll_position = ollama_state
         .scroll_position
-        .saturating_sub(ollama_state.scroll_speed * 10);
+        .saturating_sub(fast_scroll_amount);
 }
 
 /// Safely fast scroll chat down with overflow protection
 fn fast_scroll_chat_down(ollama_state: &mut OllamaState) {
     // Calculate maximum scroll position based on content
     let max_scroll = calculate_max_scroll_position(ollama_state);
+    let fast_scroll_amount = (ollama_state.scroll_speed * 5).max(5);
 
-    // Only scroll if we haven't reached the bottom
-    if ollama_state.scroll_position < max_scroll {
-        ollama_state.scroll_position =
-            (ollama_state.scroll_position + (ollama_state.scroll_speed * 10)).min(max_scroll);
-    }
+    // Always allow scrolling up to the max position, but cap at reasonable limit
+    ollama_state.scroll_position = (ollama_state.scroll_position + fast_scroll_amount)
+        .min(max_scroll)
+        .min(2000);
 }
 
 /// Calculate maximum scroll position based on chat content
 fn calculate_max_scroll_position(ollama_state: &OllamaState) -> usize {
-    // Default chat area height (this will be overridden by UI rendering bounds)
-    let default_visible_height = 20; // Conservative estimate
+    // Use a more reasonable estimate for visible height based on typical terminal sizes
+    // Most terminals are at least 24 lines, chat area is typically 60-80% of that
+    let estimated_visible_height = 12;
+
+    // If no conversation, no scrolling needed
+    if ollama_state.conversation.is_empty() {
+        return 0;
+    }
 
     // Calculate total height of all messages
     let mut total_height = 0;
 
     for msg in &ollama_state.conversation {
         // Estimate message height (content height + borders + spacing)
-        let content_width = 80; // Conservative estimate for content width
+        let content_width = 60; // More conservative estimate for content width
         let wrapped_height = calculate_estimated_wrapped_height(&msg.content, content_width);
-        let message_height = wrapped_height + 2;
-        total_height += message_height + 1;
+        let message_height = wrapped_height + 4; // Account for borders, title, and spacing
+        total_height += message_height + 1; // Add spacing between messages
     }
 
     // Add space for typing indicator if active
@@ -1208,7 +1214,17 @@ fn calculate_max_scroll_position(ollama_state: &OllamaState) -> usize {
     }
 
     // Return maximum scroll position (total height - visible height)
-    total_height.saturating_sub(default_visible_height)
+    // Allow scrolling if content is larger than visible area, but cap at reasonable maximum
+    if total_height > estimated_visible_height {
+        (total_height - estimated_visible_height).min(1000)
+    } else {
+        // Even for short content, allow minimal scrolling to test functionality
+        if ollama_state.conversation.len() > 1 {
+            1
+        } else {
+            0
+        }
+    }
 }
 
 /// Estimate wrapped height for text content
@@ -1230,5 +1246,7 @@ fn calculate_estimated_wrapped_height(text: &str, width: usize) -> usize {
         }
     }
 
-    total_lines.max(1)
+    // Add some padding for markdown formatting, code blocks, etc.
+    let estimated_height = total_lines.max(1);
+    (estimated_height as f64 * 1.2).ceil() as usize
 }

@@ -198,7 +198,7 @@ impl OllamaHandler {
 
                     // Switch to chat panel and scroll to bottom
                     ollama_state.active_panel = crate::ui::ollama::ActivePanel::CurrentChat;
-                    ollama_state.scroll_position = usize::MAX;
+                    ollama_state.scroll_to_bottom();
 
                     ollama_state.add_success_toast(format!(
                         "Loaded existing chat: {} ({} messages)",
