@@ -39,6 +39,8 @@ snix
 
 <br />
 
+Ollama support: 
+
 ```bash
 Press `l` on any snippet
 ```
