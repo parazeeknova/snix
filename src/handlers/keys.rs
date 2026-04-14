@@ -1385,147 +1385,195 @@ fn get_current_notebook_id(app: &App) -> Option<uuid::Uuid> {
 
 /// Launch external editor for snippet editing
 pub fn launch_external_editor(app: &mut App, snippet_id: uuid::Uuid) {
-    // Set flag to indicate a full UI redraw will be needed after editor use
     app.needs_redraw = true;
 
-    if let Some(snippet) = app.snippet_database.snippets.get(&snippet_id) {
-        if let Some(ref storage) = app.storage_manager {
-            let file_path = storage.get_snippet_file_path(snippet);
+    // Extract owned values upfront so we don't hold borrows across the
+    // with_suspended_terminal closure or the later mutable app calls
+    let (file_path, notebook_id, file_extension) = {
+        let snippet = match app.snippet_database.snippets.get(&snippet_id) {
+            Some(s) => s,
+            None => return,
+        };
+        let storage = match app.storage_manager.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        if let Err(e) = storage.save_snippet_content(snippet) {
+            app.set_error_message(format!("Failed to prepare file for editing: {}", e));
+            return;
+        }
+        (
+            storage.get_snippet_file_path(snippet),
+            snippet.notebook_id,
+            snippet.file_extension.clone(),
+        )
+    };
 
-            if let Err(e) = storage.save_snippet_content(snippet) {
-                app.set_error_message(format!("Failed to prepare file for editing: {}", e));
+    // suspend TUI, open editor, restore TUI
+    if let Err(e) = with_suspended_terminal(|term| launch_editor(term, &file_path)) {
+        app.set_error_message(format!("Failed to launch editor: {}", e));
+        return;
+    }
+
+    // read the (possibly changed) file back
+    let new_content = {
+        let storage = match app.storage_manager.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        match storage.load_snippet_content(snippet_id, notebook_id, &file_extension) {
+            Ok(c) => c,
+            Err(e) => {
+                app.set_error_message(format!("Failed to read edited file: {}", e));
                 return;
-            }
-
-            if let Err(e) = suspend_tui_for_editor(&file_path) {
-                app.set_error_message(format!("Failed to launch editor: {}", e));
-                return;
-            }
-
-            if let Ok(content) = storage.load_snippet_content(
-                snippet.id,
-                snippet.notebook_id,
-                &snippet.file_extension,
-            ) {
-                if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
-                    snippet.update_content(content);
-
-                    if let Err(e) = storage.save_snippet_content(snippet) {
-                        app.set_error_message(format!("Failed to save snippet: {}", e));
-                    } else {
-                        if let Err(e) = app.save_database() {
-                            app.set_error_message(format!("Failed to save database: {}", e));
-                        } else {
-                            app.set_success_message("Snippet saved successfully!".to_string());
-
-                            app.code_snippets_state = CodeSnippetsState::NotebookList;
-                            app.refresh_tree_items();
-                        }
-                    }
-                }
             }
         }
+    };
+
+    // update the in-memory snippet then write to disk
+    if let Some(snippet) = app.snippet_database.snippets.get_mut(&snippet_id) {
+        snippet.update_content(new_content);
+    }
+
+    {
+        // Re-borrow storage and snippet to save
+        let storage = match app.storage_manager.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        let snippet = match app.snippet_database.snippets.get(&snippet_id) {
+            Some(s) => s,
+            None => return,
+        };
+        if let Err(e) = storage.save_snippet_content(snippet) {
+            app.set_error_message(format!("Failed to save snippet: {}", e));
+            return;
+        }
+    }
+
+    if let Err(e) = app.save_database() {
+        app.set_error_message(format!("Failed to save database: {}", e));
+        return;
+    }
+
+    app.set_success_message("Snippet saved successfully!".to_string());
+    app.code_snippets_state = CodeSnippetsState::NotebookList;
+    app.refresh_tree_items();
+}
+
+pub struct SuspendedTerminal {
+    _private: (), // unconstructable outside this module
+}
+
+impl SuspendedTerminal {
+    // The ONLY way to get a SuspendedTerminal.
+    // This should never be called manually
+    fn enter() -> Result<Self, Box<dyn std::error::Error>> {
+        use ratatui::crossterm::{
+            execute,
+            terminal::{LeaveAlternateScreen, disable_raw_mode},
+        };
+        use std::io::{Write, stdout};
+
+        disable_raw_mode()?;
+        execute!(stdout(), LeaveAlternateScreen)?;
+        print!("\x1B[!p\x1B[3J\x1B[2J\x1B[H\x1B[?25h");
+        stdout().flush()?;
+        Ok(Self { _private: () })
+    }
+
+    // consumes self, called by with_suspended_terminal
+    fn exit(self) -> Result<(), Box<dyn std::error::Error>> {
+        use ratatui::crossterm::{
+            execute,
+            terminal::{EnterAlternateScreen, enable_raw_mode},
+        };
+        use std::io::{Write, stdout};
+
+        enable_raw_mode()?;
+        execute!(stdout(), EnterAlternateScreen)?;
+        print!("\x1Bc\x1B[!p\x1B[3J\x1B[2J\x1B[H\x1B[?1049h\x1B[?25l");
+        stdout().flush()?;
+        Ok(())
     }
 }
 
-/// Properly suspend TUI and launch external editor
-fn suspend_tui_for_editor(file_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    use ratatui::crossterm::{
-        execute,
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-    };
-    use std::io::{Write, stdout};
-    use std::process::Command;
+impl Drop for SuspendedTerminal {
+    fn drop(&mut self) {
+        // Last-resort fallback for panics. Errors are silent here by necessity.
+        use ratatui::crossterm::{
+            execute,
+            terminal::{EnterAlternateScreen, enable_raw_mode},
+        };
+        let _ = enable_raw_mode();
+        let _ = execute!(std::io::stdout(), EnterAlternateScreen);
+    }
+}
 
-    disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
+fn launch_editor(
+    _terminal: &SuspendedTerminal,
+    file_path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let candidates = build_editor_candidates();
+    let mut launched = false;
 
-    // Clear the terminal completely using the most thorough approach
-    print!("\x1B[!p"); // Soft reset (DEC)
-    print!("\x1B[3J"); // Clear scrollback buffer
-    print!("\x1B[2J"); // Clear entire screen
-    print!("\x1B[H"); // Move cursor to home position
-    print!("\x1B[?25h"); // Show cursor
-    stdout().flush()?;
-
-    // Parse $EDITOR with shell-words
-    let (env_bin, env_args): (Option<String>, Vec<String>) = match std::env::var("EDITOR") {
-        Err(_) => (None, vec![]),
-        Ok(ref val) if val.trim().is_empty() => {
-            eprintln!("Warning: $EDITOR is set but empty, falling back to defaults");
-            (None, vec![])
-        }
-        Ok(ref val) => match shell_words::split(val) {
-            Ok(parts) if !parts.is_empty() => (Some(parts[0].clone()), parts[1..].to_vec()),
-            _ => {
-                eprintln!(
-                    "Warning: could not parse $EDITOR {:?}, falling back to defaults",
-                    val
-                );
-                (None, vec![])
-            }
-        },
-    };
-
-    // Build the candidate list. $EDITOR goes first (when set)
-    let defaults = ["nvim", "vim", "nano"];
-    let mut editor_launched = false;
-    let candidates: Vec<(&str, &[String])> = {
-        let mut v = vec![];
-        if let Some(ref bin) = env_bin {
-            v.push((bin.as_str(), env_args.as_slice()));
-        }
-        for d in &defaults {
-            v.push((d, &[]));
-        }
-        v
-    };
-
-    for (editor, extra_args) in &candidates {
-        let mut cmd = Command::new(editor);
-        cmd.args(*extra_args);
-        cmd.arg(file_path);
-        if let Ok(mut child) = cmd.spawn() {
+    for (editor, args) in &candidates {
+        if let Ok(mut child) = Command::new(editor).args(args).arg(file_path).spawn() {
             if child.wait().is_ok() {
-                editor_launched = true;
+                launched = true;
                 break;
             }
         }
     }
 
-    if !editor_launched {
-        let tried: Vec<&str> = candidates.iter().map(|(bin, _)| *bin).collect();
+    if !launched {
+        let tried: Vec<&str> = candidates.iter().map(|(b, _)| b.as_str()).collect();
         println!("Could not launch any editor ({})", tried.join(", "));
         println!("Press Enter to continue...");
-        let mut buffer = String::new();
-        std::io::stdin().read_line(&mut buffer)?;
+        std::io::stdin().read_line(&mut String::new())?;
         return Err("Could not launch any editor".into());
     }
 
-    println!("\nReturning to snix...");
-    stdout().flush()?;
     std::thread::sleep(std::time::Duration::from_millis(300));
-
-    // Execute a full reset sequence for the terminal
-    print!("\x1Bc"); // Full terminal reset
-    print!("\x1B[!p"); // Soft reset (DEC)
-    print!("\x1B[3J"); // Clear scrollback buffer
-    print!("\x1B[2J"); // Clear entire screen
-    print!("\x1B[H"); // Move cursor to home position
-    stdout().flush()?;
-
-    // Restore the terminal UI state
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
-
-    // Final screen initialization
-    print!("\x1B[?1049h"); // Ensure alternate screen buffer is active
-    print!("\x1B[?25l"); // Hide cursor
-    print!("\x1B[2J"); // Clear screen
-    print!("\x1B[H"); // Move cursor to home position
-    stdout().flush()?;
-
     Ok(())
+}
+
+/// The public API. The only way to interact with a suspended terminal.
+pub fn with_suspended_terminal<F, R>(f: F) -> Result<R, Box<dyn std::error::Error>>
+where
+    F: FnOnce(&SuspendedTerminal) -> Result<R, Box<dyn std::error::Error>>,
+{
+    let term = SuspendedTerminal::enter()?;
+    let result = f(&term);
+    let restore = term.exit();
+
+    match (result, restore) {
+        (Ok(r), Ok(())) => Ok(r),
+        (Err(e), Ok(())) => Err(e),
+        (Ok(_), Err(re)) => Err(re),
+        (Err(e), Err(re)) => Err(format!("editor error: {e}; restore error: {re}").into()),
+    }
+}
+
+fn build_editor_candidates() -> Vec<(String, Vec<String>)> {
+    let mut candidates = vec![];
+
+    match std::env::var("EDITOR") {
+        Ok(ref val) if !val.trim().is_empty() => match shell_words::split(val) {
+            Ok(parts) if !parts.is_empty() => {
+                candidates.push((parts[0].clone(), parts[1..].to_vec()));
+            }
+            _ => eprintln!("Warning: could not parse $EDITOR {:?}, falling back", val),
+        },
+        Ok(_) => eprintln!("Warning: $EDITOR is empty, falling back"),
+        Err(_) => {}
+    }
+
+    for editor in &["nvim", "vim", "nano"] {
+        candidates.push((editor.to_string(), vec![]));
+    }
+
+    candidates
 }
 
 /// Handles keyboard input specifically for the start page (main menu)
